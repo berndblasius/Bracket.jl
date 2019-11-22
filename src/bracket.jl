@@ -1,11 +1,6 @@
 # new design of bracket for julia
 # closely follow the go-branch
 
-
-module Bracket
-
-using Test
-
 const CELLS     = 100*1024*1024
 const GCMARGIN  = CELLS - 24
 const STACKSIZE = 1024*1024
@@ -75,41 +70,47 @@ struct Cell
     cdr :: Int
 end
 
-@enum Primitives p_nil p_dup p_drop p_swap p_cons p_car p_cdr p_add p_sub p_mul p_div p_lt p_gt p_rnd p_eq p_typ p_if p_cond p_eval p_val p_rec p_def p_lambda p_esc p_asc p_tor p_rto p_ris p_dip p_met p_trace p_print n_primitives
+# use a closure to generate primitives
+function make_primitives()
+   counter = 0
+   function closure()
+      counter += 1
+      boxPrim(counter)
+   end
+end
 
-# number of primitives -> Int(n_primitives)
-const NIL  = boxPrim(Int(p_nil))
-const DUP  = boxPrim(Int(p_dup))
-const DROP = boxPrim(Int(p_drop))
-const SWAP = boxPrim(Int(p_swap))
-const CONS = boxPrim(Int(p_cons))
-const CAR  = boxPrim(Int(p_car))
-const CDR  = boxPrim(Int(p_cdr))
-const ADD  = boxPrim(Int(p_add))
-const SUB  = boxPrim(Int(p_sub))
-const MUL  = boxPrim(Int(p_mul))
-const DIV  = boxPrim(Int(p_div))
-const LT   = boxPrim(Int(p_lt))
-const GT   = boxPrim(Int(p_gt))
-const RND  = boxPrim(Int(p_rnd))
-const EQ   = boxPrim(Int(p_eq))
-#const TYP  = boxPrim(Int(p_typ))
-const IF   = boxPrim(Int(p_if))
-const COND = boxPrim(Int(p_cond))
-const EVAL = boxPrim(Int(p_eval))
-const VAL  = boxPrim(Int(p_val))
-const REC  = boxPrim(Int(p_rec))
-const DEF  = boxPrim(Int(p_def))
-const LAMBDA = boxPrim(Int(p_lambda))
-const ESC   = boxPrim(Int(p_esc))
-const VESC  = boxPrim(Int(p_asc))
-const TOR  = boxPrim(Int(p_tor))
-const RTO  = boxPrim(Int(p_rto))
-const RIS  = boxPrim(Int(p_ris))
-const DIP  = boxPrim(Int(p_dip))
-const META = boxPrim(Int(p_met))
-const TRACE = boxPrim(Int(p_trace))
-const PRINT = boxPrim(Int(p_print))
+newprimitive = make_primitives()
+const NIL  = newprimitive()
+const DUP  = newprimitive()
+const DROP = newprimitive()
+const SWAP = newprimitive()
+const CONS = newprimitive()
+const CAR  = newprimitive()
+const CDR  = newprimitive()
+const ADD  = newprimitive()
+const SUB  = newprimitive()
+const MUL  = newprimitive()
+const DIV  = newprimitive()
+const LT   = newprimitive()
+const GT   = newprimitive()
+const RND  = newprimitive()
+const EQ   = newprimitive()
+const IF   = newprimitive()
+const COND = newprimitive()
+const EVAL = newprimitive()
+const DIP  = newprimitive()
+const VAL  = newprimitive()
+const REC  = newprimitive()
+const DEF  = newprimitive()
+const LAMBDA = newprimitive()
+const ESC   = newprimitive()
+const VESC  = newprimitive()
+const META  = newprimitive()
+const TOR   = newprimitive()
+const RTO   = newprimitive()
+const RIS   = newprimitive()
+const TRACE = newprimitive()
+const PRINT = newprimitive()
 
 const UNBOUND = 0
 
@@ -155,7 +156,7 @@ function Vm()
     stack   = Vector{Int}(undef,STACKSIZE)
     stats = Stats(0,0,0,0)
     vm = Vm(arena,brena,next,NIL,NIL,NIL,NIL,stack,0,stats,0,0,false)
-    vm.env  = cons!(vm,NIL,NIL)
+    vm.env  = cons(vm,NIL,NIL)
     vm
 end
 
@@ -229,7 +230,7 @@ end
  
 # **********************
  
-@inline function cons!(vm,pcar, pcdr)
+@inline function cons(vm,pcar, pcdr)
     vm.next += 1
     if vm.next > GCMARGIN
       vm.need_gc = true
@@ -245,6 +246,7 @@ cadr(c,vm) = car(cdr(c,vm),vm)
 cddr(c,vm) = cdr(cdr(c,vm),vm)
 pop(vm,list) = (car(vm,list), cdr(vm,list))   # unsafe
 pop2(vm,list) = (car(vm,list), car(vm,cdr(vm,list)), cdr(vm,cdr(vm,list)))  # unsafe
+#popsafe(vm,elem) = isCons(elem) ? pop(vm,elem) : (elem,elem)
 
 function length_list(vm,l)
     n=0
@@ -260,12 +262,26 @@ function length_list(vm,l)
 # but also a flag 
 function reverse_list(vm,list)
     l = NIL
-    while isDef(list)
-      e, list = pop(vm,list)
-      l = cons!(vm,e,l)
+    while isCons(list)
+      p, list = pop(vm,list)
+      l = cons(vm,p,l)
     end
     if isDef(list)   # list contained a dotted pair 
-      l = cons!(vm,list,l)
+      l = cons(vm,list,l)
+      return l, true
+    else
+      return l, false  # list did not contain a dotted pair
+    end
+end
+
+function reverse_list1(vm,list)
+    l = NIL
+    while isDef(list)
+      e, list = pop(vm,list)
+      l = cons(vm,e,l)
+    end
+    if isDef(list)   # list contained a dotted pair 
+      l = cons(vm,list,l)
       return l,true
     else
       return l,false  # list did not contain a dotted pair
@@ -274,7 +290,7 @@ end
  
 function isEqual(vm,p1,p2)
     if isCons(p1) && isCons(p2)
-        isEqual(vm,car(p1,vm),car(p2,vm)) && 
+        isEqual(vm,car(vm,p1),car(vm,p2)) && 
         isEqual(vm,cdr(vm,p1),cdr(vm,p2))
     else
         p1 == p2
@@ -319,7 +335,7 @@ end
 end
 
 # creates new empty environment
-@inline newenv(vm,env) = cons!(vm, NIL, env)
+@inline newenv(vm,env) = cons(vm, NIL, env)
 
 
 # ************ io   ****************************************************+
@@ -374,7 +390,7 @@ function symbol2string(symb)
    return ""
 end
 
-function printElem(vm, q, invert)
+function printElem(vm, q)
     if isInt(q)
         print(unbox(q))
     #elseif isFloat(q)
@@ -382,70 +398,55 @@ function printElem(vm, q, invert)
     elseif isNil(q)
          print("[]")
     elseif isPrim(q)
-         #print(keys(filter(p->p.second == p , symboltable)))
-         #print(symbStr[unbox(q)])
-         prim_name = string(Primitives(unbox(q)))
-         print(prim_name[3:end])
+         print(first(keys(filter(p->p.second == q , symboltable))))
     elseif isSymb(q)
          print(symbol2string(q))
     else
-        printList(vm,q,invert)
+        printList(vm,q)
     end
 end
- 
-function printList(vm,l, invert)
-    if isNil(l)
-        print("[]")
-    else
-       if invert; l,b=reverse_list(vm,l); end
-       print("[")
-       printElem(vm,car(vm,l),invert)
-       l = cdr(vm,l)
-       while isDef(l)
-           print(" ")
-           printElem(vm,car(vm,l), invert)
-           l = cdr(vm,l)
+
+function printInnerList(vm, list, invert)
+    isdotted = false
+    if isCons(list)
+       if invert 
+          list, isdotted = reverse_list(vm,list) 
        end
-       print("]")
-    end
-end
- 
-function printBra(vm,l)
-    if isNil(l)
-        println("[|")
-    else
-      # println("bra not nil")
-       print("[")
-       l,b = reverse_list(vm,l)
-       printElem(vm,car(vm,l),true)
-       l = cdr(vm,l)
-       while isDef(l)
-           print(" ")
-           printElem(vm,car(vm,l), true)
-           l = cdr(vm,l)
+       p, list = pop(vm,list) 
+       printElem(vm,p)
+       if isdotted   # dotted list that was reversed
+          print(" .")
        end
-       println("|")
+       while isCons(list)
+          p, list = pop(vm,list) 
+          print(" ")
+          printElem(vm,p)
+       end
+       if isDef(list)   # dotted list
+          print(" *")
+          printElem(vm,list)
+       end
     end
 end
- 
+
+function printList(vm,l)
+    print("[")
+    printInnerList(vm,l,true)
+    print("]")
+end
+
 function printKet(vm,l)
-    if isNil(l)
-        println("|]")
-    else
-       print("|")
-       #printElem(car(l),true,vm)
-       printElem(vm,car(vm,l),false)   # just now for testing
-       l = cdr(vm,l)
-       while isDef(l)
-           print(" ")
-           #printElem(car(l), true, vm)
-           printElem(vm,car(vm,l), false)   # just now for testing
-           l = cdr(vm,l)
-       end
-       println("]")
-    end
+    print("[")
+    printInnerList(vm,l,false)
+    println(">")
 end
- 
+
+function printBra(vm,l)
+    print("<")
+    printInnerList(vm,l,true)
+    println("]")
+end
+
 function atom(token)
      if (length(token) == 1) && haskey(symboltable,token)   # + - * /
          return symboltable[token]
@@ -531,24 +532,24 @@ function read_tokens!(vm,io)
         return val
       elseif c == '['    # begin of list
         newval = read_tokens!(vm,io)
-        val = cons!(vm,newval, val)
+        val = cons(vm,newval, val)
       elseif c == '\''   # escape
-        val = cons!(vm,ESC, val)
+        val = cons(vm,ESC, val)
       elseif c == '`'   # Asc (escape value)
-        val = cons!(vm, VESC, val)
+        val = cons(vm, VESC, val)
       elseif c == '\\'   # Backslash = lambda
-        val = cons!(vm, LAMBDA, val)
+        val = cons(vm, LAMBDA, val)
       else               # read new atom
         #write(io, c)
         skip(io,-1)
         token = read_token(io)
         newval = atom(token)
-        val = cons!(vm, newval, val)
+        val = cons(vm, newval, val)
       end
     end
 end
  
-function bra(vm,prog::String)
+function make_bra(vm,prog::String)
     io = IOBuffer(prog)
     read_tokens!(vm, io)
 end
@@ -564,7 +565,7 @@ end
 # **************************** builtins *********************************
 function f_dup!(vm)
     if isCons(vm.ket)
-        vm.ket = cons!(vm,car(vm,vm.ket), vm.ket)
+        vm.ket = cons(vm,car(vm,vm.ket), vm.ket)
     end
  end
  
@@ -585,7 +586,7 @@ function f_math!(vm,op)
        #end
  
        n3 = boxInt(op(unbox(n1), unbox(n2)))
-       vm.ket = cons!(vm,n3,vm.ket)
+       vm.ket = cons(vm,n3,vm.ket)
     end
 end
 
@@ -728,7 +729,7 @@ function eval_bra!(vm)
     while true
       if vm.trace > 0
          #println("trace ")
-         #printBra(vm.bra,vm)
+         printBra(vm,vm.bra)
          printKet(vm,vm.ket)
          #println("stackdepth ", vm.stackindex)
          #printElem(vm.stack[vm.stackindex],false, vm)
@@ -742,20 +743,20 @@ function eval_bra!(vm)
  
       e, vm.bra = pop(vm,vm.bra)
       if isNil(e)
-          vm.ket = cons!(vm,e,vm.ket)
+          vm.ket = cons(vm,e,vm.ket)
       elseif isPrim(e)
           eval_prim!(vm,e)
       #elseif isSymb(e)
       #     eval_symb!(vm,e)
       else
-           vm.ket = cons!(vm,e,vm.ket)
+           vm.ket = cons(vm,e,vm.ket)
       end
  
       if vm.need_gc
          gc!(vm)
       end
  
-      if isNil(vm.bra)   # exit scope
+      if isAtom(vm.bra)   # exit scope
          if vm.depth == starting_depth
                break
          end
@@ -767,48 +768,3 @@ function eval_bra!(vm)
     end
     vm.bra = popstack!(vm)
  end
- 
- 
-
- 
-function main()
-    println("Start Bracket")
-    vm = Vm()
-    #vm.env = cons!(vm,NIL,NIL)
-    #load prelude
-    #vm.bra = load_file("prelude.clj", vm)
-    #vm.ket = NIL
-    #eval_bra!(vm)
-
-
-    # repl(vm)    # repl should run in depth 0
-    vm.depth = 1  # normal programs start in depth 1
-
-
-    vm.ket = NIL
-
-    str = "1 3 foo [bar 4 dup]"
-    str = "swap 3 4"
-    str = "eval [ rec gt 0 dup add 1 ] -20 trace 1"
-    #str = "eval [ rec gt 0 dup add 1 ] -50000000"  # 5e7  # 2.8 sec
-    str = "eval [ rec gt 0 dup add 1 ] -500000000"  # 5e8  # 12.6sec
-
-    vm.bra = bra(vm, str)
-
-    #vm.bra = load_file("test.clj",vm)
-
-    printBra(vm, vm.bra)
-    #vm.bra = cons!(box_int(1), NIL, vm)
-    vm.ket = NIL;
-
-    eval_bra!(vm)
-
-    println("done")
-
-
-end
- 
-
-@time main()
-
-end # module
