@@ -20,10 +20,11 @@ function main()
     vm.ket = NIL
 
     str = "1 3 foo [bar 4 dup]"
-    str = "swap 3 4"
-    #str = "eval [ rec gt 0 dup add 1 ] -20 trace 1"
+    str = "eval [ rec gt 0 dup add 1 print dup] -20 trace 0"
     #str = "eval [ rec gt 0 dup add 1 ] -50000000"  # 5e7  # 2.8 sec
-    str = "eval [ rec gt 0 dup add 1 ] -500000000"  # 5e8  # 12.6sec
+    #str = "eval [ rec gt 0 dup add 1 ] -500000000"  # 5e8  # 12.6sec
+
+    str = "cons 4 x'"
 
     vm.bra = make_bra(vm, str)
     

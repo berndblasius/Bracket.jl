@@ -121,7 +121,7 @@ const symboltable = Dict(
    "*"=>MUL, "/"=>DIV, "lt"=>LT, "gt"=>GT, "eq"=>EQ,
    "rnd" =>RND, "if"=>IF, "cond"=>COND, "eval"=>EVAL, "val"=>VAL,
    "rec"=>REC, "def"=>DEF, "lambda"=>LAMBDA, "\\"=>LAMBDA,
-   "esc"=>ESC, "'"=>ESC, "`"=>VESC, "toR"=> TOR, "Rto"=>RTO, "Ris"=>RIS, 
+   "esc"=>ESC, "'"=>ESC, "`"=>VESC, "vesc"=>VESC, "toR"=> TOR, "Rto"=>RTO, "Ris"=>RIS, 
    "dip"=>DIP, "meta"=>META, "trace"=>TRACE,
    "print"=>PRINT)
 
@@ -337,7 +337,113 @@ end
 # creates new empty environment
 @inline newenv(vm,env) = cons(vm, NIL, env)
 
+# ************ bindings ************************************************
 
+function findKey(vm, key, env)
+    bnds = car(vm,vm.env)  #current frame (list of bindings) is on top of env
+    while isCons(bnds) 
+       bnd = car(vm,bnds)
+       if car(vm,bnd) == key 
+           return bnd
+       else 
+          bnds = cdr(vm,bnds) 
+       end
+    end
+    return NIL
+end
+
+function boundvalue(vm, key) # lookup symbol.. 
+    bnd = binding(vm, key, vm.env)
+    if bnd == NIL 
+        return NIL
+    else 
+        return cdr(vm,bnd)
+    end
+end      
+
+function binding(vm, key, env)
+    bnd = findKey(vm, key, env)
+    while isNil(env) 
+       env = cdr(vm,env)
+       if isNil(env) 
+          return NIL
+       end
+       bnd = findKey(vm, key, env)
+    end
+    return bnd
+end
+
+
+function bindKey(vm, key, val) 
+    f = NIL
+    frame, vm.env = pop(vm, vm.env)   # pop frame from env
+    while isCons(frame) 
+       b,frame = pop(vm, frame)   # search frame for key
+       if car(vm,b) == key 
+          break
+       else 
+          f = cons(vm, b,f)   # store binding in aux frame f
+       end
+    end
+    while isCons(f) 
+       b,f = pop(vm, f)    # put other bindings back in place
+       frame = cons(vm,b,frame)
+    end
+    b1 = cons(vm, key, val)  # and add new binding
+    frame = cons(vm, b1, frame)
+    vm.env = cons(vm, frame, vm.env)
+end
+
+function replaceKeyInFrame(vm, key, val, frame)
+    f = NIL
+    while isCons(frame)
+       b,frame = pop(vm, frame)   # search for key
+       if car(vm,b) == key 
+          b1 = cons(vm, key, val)  # new binding
+          frame = cons(vm, b1, frame)
+          break
+       else 
+          f = cons(vm, b,f)
+       end
+    end
+    if frame == NIL   # key not found
+        return NIL
+    end 
+    while isCons(f) 
+       b,f = pop(vm, f)  # put other bindings back in place
+       frame = cons(vm, b,frame)
+    end
+    return frame
+end
+
+function replaceKey(vm, key, val, env)
+    e = NIL  # empty envirohnment
+    envSave = env
+    while isCons(env) 
+       f,env = pop(vm, env)   # search all frames in environment
+       f1 = replaceKeyInFrame(vm, key, val, f)
+       if isDef(f1)  # key found
+          env = cons(vm, f1, env) 
+          printKet(vm, env)
+          break
+       else
+          e = cons(vm,f,e)
+       end
+    end 
+    if isNil(env)  # key not found
+        b = cons(vm,key,val)
+        f,envSave = pop(vm,envSave)
+        f = cons(vm,b,f)
+        return cons(vm,f,env)
+    end
+    while isCons(e)
+      f,e = pop(vm,e)   # put other frames back in place
+      env = cons(vm, f, env)
+    end
+    return env
+end
+
+          
 # ************ io   ****************************************************+
 
 # compared to Base64 we place the digits at the beginning 
@@ -370,7 +476,7 @@ function string2symbol(str)
          if nok == 10; break; end
        end
    end
-   symb(x)
+   boxSymb(x)
 end
 
 function symbol2string(symb)
@@ -560,14 +666,70 @@ function load_file(vm, prog)
      close(io)
      val
 end
-# ************ io   ****************************************************+
 
 # **************************** builtins *********************************
-function f_dup!(vm)
+function f_dup(vm)
     if isCons(vm.ket)
         vm.ket = cons(vm,car(vm,vm.ket), vm.ket)
     end
  end
+ 
+function f_drop(vm)
+    if isCons(vm.ket)
+        vm.ket = cdr(vm,vm.ket)
+    end
+end
+ 
+function f_swap(vm)
+    if isCons2(vm,vm.ket)
+        a,b,vm.ket  = pop2(vm,vm.ket)
+        vm.ket = cons(vm,a,vm.ket)
+        vm.ket = cons(vm,b,vm.ket)
+    end
+end
+ 
+ 
+function f_cons(vm)
+    if isCons2(vm,vm.ket)
+       p1, p2, vm.ket = pop2(vm,vm.ket)
+       vm.ket = cons(vm,cons(vm,p1,p2),vm.ket)
+    end
+end
+ 
+function f_car(vm)
+    if isCons(vm.ket)
+        p, vm.ket = pop(vm,vm.ket)
+        if isCons(p) # car a list
+            head,p = pop(vm,p)
+            vm.ket = cons(vm,p,vm.ket)  # leave rest of list on the ket
+            vm.ket = cons(vm,head,vm.ket)
+        else          # car a symbol
+            ####if isNil(p); return; end
+            val = boundvalue(vm,p)  # lookup symbol
+            if isCons(val)
+              vm.ket = cons(vm,car(vm,val), vm.ket)
+            end
+        end
+    end
+end
+ 
+function f_cdr(vm)
+    if isCons(vm.ket)
+        p, vm.ket = pop(vm,vm.ket)
+        if isCons(p)   # cdr a list
+            head, p = pop(vm,p)
+            vm.ket = cons(vm,p,vm.ket)
+        else
+            val = boundvalue(vm,p)  # look up symbole
+            if isCons(val)
+               vm.ket = cons(vm,cdr(vm,val), vm.ket)
+            else
+               vm.ket = cons(vm,NIL,vm.ket) #at least leave a nill on ket
+            end
+        end
+    end
+end
+ 
  
 # some math functions (we can easily extend to more..)
 rnd(x) = x < 1 ? 0 : rand(1:x)
@@ -575,22 +737,101 @@ lt(x1,x2) = x1 < x2 ? 1 : 0
 gt(x1,x2) = x1 > x2 ? 1 : 0
 my_div(x1,x2) = x2 == 0 ? 0 : div(x1,x2)
 
-function f_math!(vm,op)
+function f_math(vm,op)
     if isCons2(vm,vm.ket)
        n1,n2, vm.ket = pop2(vm,vm.ket)
-       #if isSymb(n1)
-       #  n1 = boundvalue(n1,vm)
-       #end
-       #if isSymb(n2)
-       #  n2 = boundvalue(n2,vm)
-       #end
- 
+       if isSymb(n1)
+         n1 = boundvalue(vm,n1)
+       end
+       if isSymb(n2)
+         n2 = boundvalue(vm,n2)
+       end
        n3 = boxInt(op(unbox(n1), unbox(n2)))
        vm.ket = cons(vm,n3,vm.ket)
     end
 end
 
-function f_rec!(vm)
+function f_rnd(vm)
+    if isCons(vm.ket)
+        p, vm.ket = pop(vm,vm.ket)
+        if isInt(p)
+            p=boxInt(rand(1:unbox(p)))
+        elseif isCons(p)
+            n=length_list(vm,p)-1
+            n1=rand(0:n)
+            for i=1:n1
+                p = cdr(vm,p)
+            end
+            p = car(vm,p)
+        end
+        vm.ket=cons(vm,p,vm.ket)
+    end
+end
+
+function f_eq(vm)
+    if isCons2(vm,vm.ket)
+       p1, p2, vm.ket = pop2(vm,vm.ket)
+       b = isEqual(vm,p1,p2)
+       # <<4 of Boolean is automatically converted to Int64
+       vm.ket = cons(vm,boxInt(b),vm.ket)
+    end
+end
+ 
+function f_if(vm)
+    if isCons2(vm,vm.ket)
+        e1,e2,vm.ket = pop2(vm,vm.ket)
+        if isCons(vm.ket)
+            b, vm.ket = pop(vm,vm.ket)
+            vm.ket = istrue(b) ? cons(vm,e1,vm.ket) : cons(vm,e2,vm.ket)
+        end
+    end
+end
+
+function f_esc(vm)
+    if isCons(vm.bra)
+        val, vm.bra = pop(vm,vm.bra)
+        vm.ket = cons(vm,val,vm.ket)
+     end
+end
+ 
+function f_vesc(vm)
+    if isCons(vm.bra)
+        val, vm.bra = pop(vm,vm.bra)
+        vm.ket = cons(vm,val,vm.ket)
+        f_val(vm)
+     end
+end
+ 
+function f_val(vm)
+    if isCons(vm.ket)
+        key, vm.ket = pop(vm,vm.ket)
+        if isCons(key)
+           vm.ket = cons(vm,key,vm.ket)
+        else
+           val = boundvalue(vm,key)
+           vm.ket = cons(vm,val,vm.ket)
+        end
+     end
+end
+
+function f_trace(vm)
+    if isCons(vm.ket)
+       p,vm.ket = pop(vm,vm.ket)
+       vm.trace = unbox(p)
+    end
+end
+
+function f_print(vm)
+    if isCons(vm.ket)
+        p,vm.ket = pop(vm,vm.ket)
+        #print_bra(p,vm)
+        #println(" here goes the next")
+        printElem(vm,p)
+        print(" ")
+    end
+end
+
+function f_rec(vm)
     #anonymous recursion: replace bra of this scope by original value
     if isCons(vm.ket)
         b, vm.ket = pop(vm,vm.ket)
@@ -598,29 +839,48 @@ function f_rec!(vm)
             vm.bra = getstack(vm)
         end
     end
-    nothing
 end
     
+function f_def(vm)
+    if isCons2(vm,vm.ket)
+        key, value, vm.ket = pop2(vm,vm.ket)
+        if !isCons(key)
+            bindKey(vm,key,value)  #bind key to val in top env-frame
+        else
+        #    x,key = pop(key,vm)
+        #    if isNil(key)
+        #        bind_key(x,value,vm)
+        #    elseif (x == ESC) && isCons(key)  # variable definition
+        #        x,key = pop(key,vm)
+        #        fesc(x,key,value,vm)
+            ##} else if ((x == Hesc) && isCons(key)) { . // set: still to be done
+            ##
+            ##}
+        #    else   # default is handled as let
+        #        f_let(x,key,value,vm)
+        #    end
+        end
+    end
+end
 
-function f_eval!(vm)
+function f_eval(vm)
     if isCons(vm.ket)
         op,vm.ket = pop(vm,vm.ket)
         if isCons(op)
-            eval_cons!(vm,op)
+            eval_cons(vm,op)
         elseif isNil(op)
             return
         elseif isPrim(op)
-              eval_prim!(vm,op)
-        #elseif isSymb(op)
-        #      eval_symb!(op,vm)
-        #else    # eval a number
-        #    eval_numb!(op,vm)
+              eval_prim(vm,op)
+        elseif isSymb(op)
+              eval_symb(vm,op)
+        else    # eval a number
+              eval_numb(vm,op)
         end
     end
-   nothing
 end
 
-function eval_cons!(vm, op)
+function eval_cons(vm, op)
     if isCons(vm.bra)
         vm.depth += 1
         pushstack!(vm,vm.env)
@@ -631,70 +891,114 @@ function eval_cons!(vm, op)
         replacestack!(vm,op)
     end
     vm.bra = op
-    nothing
+end
+
+function eval_numb(vm, n)
+    vm.ket = cons(vm,n,vm.ket)
+end
+
+function eval_symb(vm,sym)
+    #printElem(sym,0,vm); println()
+    #printElem(vm.ket,false,vm); println()
+    #println()
+    bnd = binding(vm,sym,vm.env)
+    if isNil(bnd)
+        vm.ket = cons(vm,NIL,vm.ket)
+    else
+        val = cdr(vm,bnd)
+        if isCons(val)
+            eval_cons(vm,val)
+        else
+            vm.ket = cons(vm,val,vm.ket)
+        end
+    end
+    #=
+    elseif isclosure(bnd,vm)
+        op =cadr(bnd,vm)
+        env = cddr(bnd,vm)
+        if isCons(op)
+            if isCons(vm.bra)  # not tail position
+                vm.depth += 1
+                if vm.depth >  MAX_RECUR_DEPTH
+                    error("Error: too many recursions")
+                end
+                pushstack!(vm,vm.env)
+                pushstack!(vm,vm.bra)
+                pushstack!(vm,op)   ## 2nd
+                vm.env = newenv(env,vm)
+           else   # tail position
+                vm.env = newenv(env,vm)
+            end
+            vm.bra = op
+        end
+    else
+       vm.ket = cons!(cadr(bnd,vm),vm.ket,vm)
+    end
+    =#
 end
 
 
-@inline function eval_prim!(vm,x)
+
+@inline function eval_prim(vm,x)
     #println("eval prim")
     if x == DUP
-        f_dup!(vm)
-    #elseif x == DROP
-    #    f_drop!(vm)
-    #elseif x == SWAP
-    #    f_swap!(vm)
-    #elseif x == CONS
-    #    f_cons!(vm)
-    #elseif x == CAR
-    #    f_car!(vm)
-    #elseif x == CDR
-    #    f_cdr!(vm)
+        f_dup(vm)
+    elseif x == DROP
+        f_drop(vm)
+    elseif x == SWAP
+        f_swap(vm)
+    elseif x == CONS
+        f_cons(vm)
+    elseif x == CAR
+        f_car(vm)
+    elseif x == CDR
+        f_cdr(vm)
     elseif x == ADD
-        f_math!(vm,+)
-    #elseif x == SUB
-    #    f_math!(vm,-)
-    #elseif x == MUL
-    #    f_math!(vm,*)
-    #elseif x == DIV
-    #    f_math!(vm,my_div)
-    #elseif x == LT
-    #    f_math!(vm,lt)
+        f_math(vm,+)
+    elseif x == SUB
+        f_math(vm,-)
+    elseif x == MUL
+        f_math(vm,*)
+    elseif x == DIV
+        f_math(vm,my_div)
+    elseif x == LT
+        f_math(vm,lt)
     elseif x ==GT
-        f_math!(vm,gt)
-    #elseif x ==RND
-    #    f_rnd!(vm)
-    #elseif x ==EQ
-    #    f_eq!(vm)
-    #elseif x ==IF
-    #    f_if!(vm)
+        f_math(vm,gt)
+    elseif x ==RND
+        f_rnd(vm)
+    elseif x ==EQ
+        f_eq(vm)
+    elseif x ==IF
+        f_if(vm)
     #elseif x ==TYP
-    #    f_typ!(vm)
+    #    f_typ(vm)
     elseif x ==EVAL
-        f_eval!(vm)
-    #elseif x == DEF
-    #    f_def!(vm)
+        f_eval(vm)
+    elseif x == DEF
+        f_def(vm)
     elseif x == REC
-        f_rec!(vm)
-    #elseif x == VAL
-    #    f_val!(vm)
-    #elseif x == ESC
-    #    f_esc!(vm)
-    #elseif x == ASC
-    #    f_asc!(vm)
+        f_rec(vm)
+    elseif x == VAL
+        f_val(vm)
+    elseif x == ESC
+        f_esc(vm)
+    elseif x == VESC
+        f_vesc(vm)
     #elseif x == RTO
-    #    f_rto!(vm)
+    #    f_rto(vm)
     #elseif x == TOR
-    #    f_tor!(vm)
+    #    f_tor(vm)
     #elseif x == RIS
-    #    f_ris!(vm)
+    #    f_ris(vm)
     #elseif x == DIP
-    #    f_dip!(vm)
-    #elseif x == TRACE
-    #    f_trace!(vm)
-    #elseif x == PRINT
-    #    f_print!(vm)
-    #elseif x == META
-    #    f_meta!(vm)
+    #    f_dip(vm)
+    elseif x == TRACE
+        f_trace(vm)
+    elseif x == PRINT
+        f_print(vm)
+    elseif x == META
+        f_meta(vm)
     end
     nothing
 
@@ -745,9 +1049,9 @@ function eval_bra!(vm)
       if isNil(e)
           vm.ket = cons(vm,e,vm.ket)
       elseif isPrim(e)
-          eval_prim!(vm,e)
-      #elseif isSymb(e)
-      #     eval_symb!(vm,e)
+          eval_prim(vm,e)
+      elseif isSymb(e)
+           eval_symb(vm,e)
       else
            vm.ket = cons(vm,e,vm.ket)
       end
