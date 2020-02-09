@@ -1,7 +1,7 @@
 # new design of bracket for julia
 # closely follow the go-branch
 
-const CELLS     = 100*1024*1024
+const CELLS     = 24*1024*1024
 const GCMARGIN  = CELLS - 24
 const STACKSIZE = 1024*1024
 
@@ -9,10 +9,10 @@ const STACKSIZE = 1024*1024
 # three bits are used (from Bit 1 to Bit 3), Bit 4 is free and can be used for gc for tree traversals
 # local pointer, global pointer, Int, Prim, Symbol, Float
 # global pointers not used yet, will become meta gene pool of gene bracket
-# Bit 1 = 0 ->  Cons
+# Bit 1 = 0 ->  Cell
 #    Bit 2 = 0 --> pointer to cell on local heap
 #    Bit 2 = 1 --> pointer to cell on global heap  (not used in the moment)
-#    Bit 3 = 0 --> list (or quotation)
+#    Bit 3 = 0 --> cons (ie, list or quotation)
 #    Bit 3 = 1 --> closure
 # Bit 1 = 1 ->  Number or Symb
 # Bit 2 = 0 --> Symb
@@ -24,6 +24,7 @@ const STACKSIZE = 1024*1024
 
 const tagType    = 7  # mask with bits 111
 const tagGlobal  = 2  # bits 010    cell on global heap
+const tagCell    = 1  # bits 101
 const tagCons    = 5  # bits 101
 const tagClosure = 4  # bits 100
 const tagPrim    = 5  # bits 101
@@ -32,7 +33,7 @@ const tagNumb    = 2  # bits 010
 const tagInt     = 3  # bits 011
 const tagFloat   = 7  # bits 111
 
-@inline boxCell(x) = x<<4    # create a new local cons
+@inline boxCons(x) = x<<4    # create a new local cons
 @inline boxClosure(x) = x<<4 | tagClosure   # create a new local closure
 #func boxGlobal(x) = x<<4 | tagGlobal
 @inline boxPrim(x) = x<<4 | tagPrim  # create a local primitive
@@ -54,15 +55,17 @@ const tagFloat   = 7  # bits 111
 @inline isSymb(x)   = x & tagType == tagSymb
 @inline isLocal(x)  = x & tagGlobal == 0
 @inline isGlobal(x) = x & tagGlobal == tagGlobal
+@inline isCell(x)   = x & tagCell == 0
+@inline isAtom(x)   = x & tagCell == tagCell
 @inline isCons(x)   = x & tagCons == 0
 @inline isClosure(x) = x & tagCons == tagClosure
-@inline isAtom(x)   = !isCons(x)
 @inline isNumb(x)   = x & tagNumb == tagNumb
 @inline isAbstractSymb(x) = x & tagNumb == 0  # symbol or primitive
 
 @inline isNil(x) = x == NIL
 @inline isDef(x) = x != NIL
-isCons2(vm,x) = isCons(x) && isCons(cdr(vm,x))
+isCell2(vm,x) = isCell(x) && isCell(cdr(vm,x))
+#isCons2(vm,x) = isCons(x) && isCons(cdr(vm,x))
 #isCons3(x,vm) = isCons(x) && isCons(cdr(x,vm)) && isCons(cddr(x,vm))
 
 struct Cell
@@ -111,7 +114,7 @@ const RTO   = newprimitive()
 const RIS   = newprimitive()
 const TRACE = newprimitive()
 const PRINT = newprimitive()
-
+# probably not really needed SET, WHL
 const UNBOUND = 0
 
 
@@ -136,7 +139,7 @@ end
 mutable struct Vm
     arena    :: Vector{Cell}  # memory arena to hold the cells
     brena    :: Vector{Cell}  # second arena, needed for copying gc
-    next     :: Int    # index into current cell in heap
+    next     :: Int    # index into current cell in arena
     bra      :: Int    # global program stack
     ket      :: Int    # global data stack
     aux      :: Int    # auxillary global stack
@@ -178,25 +181,29 @@ end
 #  implement Cheney copying algorithm
 #    Cheney :  non-recursive traversal of live-objects
 function relocate!(vm, c)
-    if !isCons(c)
+    if !isCell(c)
         return c
     end
-    indv = unbox(c)
-    @inbounds ah = vm.brena[indv]
-    if ah.car == UNBOUND
-        return ah.cdr
+    indb = unbox(c)    # index into brena
+    @inbounds bcell = vm.brena[indb]
+    if bcell.car == UNBOUND
+        return bcell.cdr
     end
-    ind = vm.next
-    bc = boxCell(ind)
+    inda = vm.next     # index into arena
+    if isCons(c)
+        c1 = boxCons(inda)
+    else
+        c1 = boxClosure(inda)
+    end
     @inbounds begin
-         vm.arena[ind]   = vm.brena[indv]
-         vm.brena[indv] = Cell(UNBOUND, bc)
+         vm.arena[inda] = bcell
+         vm.brena[indb] = Cell(UNBOUND, c1)
     end
     vm.next += 1
-    bc
+    c1
 end
  
-function gc!(vm)
+function gc(vm)
     println("starting gc ************************************************")
  
     (vm.brena, vm.arena) = (vm.arena, vm.brena)
@@ -220,6 +227,7 @@ function gc!(vm)
     end
  
     #println("GC: live objects found: ", vm.next-1)
+    #println("GC: stack ", vm.stackindex, " ", vm.depth)
  
     if vm.next >= GCMARGIN
         error("Bracket GC, heap too small")
@@ -230,66 +238,105 @@ end
  
 # **********************
  
-@inline function cons(vm,pcar, pcdr)
+function new_cons(vm,pcar, pcdr)
     vm.next += 1
     if vm.next > GCMARGIN
       vm.need_gc = true
     end
     @inbounds vm.arena[vm.next] = Cell(pcar,pcdr)
-    boxCell(vm.next)  # return a boxed index
+    vm.next  # return a boxed index
 end
   
-@inline @inbounds car(vm,c) = vm.arena[unbox(c)].car
-@inline @inbounds cdr(vm,c) = vm.arena[unbox(c)].cdr
-caar(c,vm) = car(car(c,vm),vm)
-cadr(c,vm) = car(cdr(c,vm),vm)
-cddr(c,vm) = cdr(cdr(c,vm),vm)
+cons(vm,pcar,pcdr) = boxCons(new_cons(vm,pcar,pcdr))
+closure(vm,pcar,pcdr) = boxClosure(new_cons(vm,pcar,pcdr))
+
+strip_closure(vm,cl) = isClosure(cl) ? car(vm,cl) : cl
+
+
+# ------- careful that we do not leak mutablilty
+#         should be used only for environments
+# modify car or cdr of a cell without allocating a new cell
+# should only be used for bindings
+@inline function setcar!(vm, cl, newcar)
+    ind = unbox(cl)
+    @inbounds  c = vm.arena[ind]
+    @inbounds  vm.arena[ind] = Cell(newcar, c.cdr)
+end
+ 
+@inline function setcdr!(vm, cl, newcdr)
+    ind = unbox(cl)
+    @inbounds  c = vm.arena[ind]
+    @inbounds  vm.arena[ind] = Cell(c.car, newcdr)
+end
+# --------------------
+ 
+#unsafe, assumes c is a Cell
+@inbounds car(vm,c) = vm.arena[unbox(c)].car
+@inbounds cdr(vm,c) = vm.arena[unbox(c)].cdr
+caar(vm,c) = car(vm,car(vm,c))
+cadr(vm,c) = car(vm,cdr(vm,c))
+cddr(vm,c) = cdr(vm,cdr(vm,c))
 pop(vm,list) = (car(vm,list), cdr(vm,list))   # unsafe
 pop2(vm,list) = (car(vm,list), car(vm,cdr(vm,list)), cdr(vm,cdr(vm,list)))  # unsafe
 #popsafe(vm,elem) = isCons(elem) ? pop(vm,elem) : (elem,elem)
 
+# just count the number of conses, ie dotted pair has length 1
 function length_list(vm,l)
     n=0
-    while isCons(l)
+    while isCell(l)
         n += 1
         l = cdr(vm,l)
     end
     n
  end
  
+ #list length, without quoted values (but also including dotted pairs) 
+ function length_nonquoted(vm, list)
+    n = 0
+    while isCell(list) 
+        elem = car(vm,list)
+        if elem == ESC     # a quoted element
+           if isDef(cdr(vm,list))  
+              list = cdr(vm,list)
+           end
+        elseif elem != VESC && elem != LAMBDA    #no quoted element
+           n += 1
+        end
+        list = cdr(vm,list)
+    end
+    if isDef(list)   #count last element in dotted pair
+        n += 1
+    end
+    n
+ end
+
 # reverse a list
 # if list contained a dotted pair, reverse returns normal list
 # but also a flag 
+# reverse only to first occurence of a closure, because
+#   closures can occur only at end of a list
+#   to avoid infinite loop when printing environments
 function reverse_list(vm,list)
     l = NIL
-    while isCons(list)
+    while isCons(list)    # take care not to pop from a closure
       p, list = pop(vm,list)
       l = cons(vm,p,l)
     end
-    if isDef(list)   # list contained a dotted pair 
+    if isClosure(list)    # take only quotation from closure, not the environment
+      l = cons(vm,car(vm,list),l)
+      return l, true
+    elseif isDef(list)    # list contained a dotted pair 
       l = cons(vm,list,l)
       return l, true
     else
-      return l, false  # list did not contain a dotted pair
+      return l, false     # list did not contain a dotted pair
     end
 end
 
-function reverse_list1(vm,list)
-    l = NIL
-    while isDef(list)
-      e, list = pop(vm,list)
-      l = cons(vm,e,l)
-    end
-    if isDef(list)   # list contained a dotted pair 
-      l = cons(vm,list,l)
-      return l,true
-    else
-      return l,false  # list did not contain a dotted pair
-    end
-end
- 
 function isEqual(vm,p1,p2)
-    if isCons(p1) && isCons(p2)
+    p1 = strip_closure(vm,p1)
+    p2 = strip_closure(vm,p2)
+    if isCell(p1) && isCell(p2)
         isEqual(vm,car(vm,p1),car(vm,p2)) && 
         isEqual(vm,cdr(vm,p1),cdr(vm,p2))
     else
@@ -297,21 +344,16 @@ function isEqual(vm,p1,p2)
     end
 end
  
-istrue(l) = isDef(l) ?  (unbox(l) != 0) : false
- 
-@inline istrue(l) = l != NIL && unbox(l) != 0
-@inline isfalse(l) = l == NIL || unbox(l) == 0
-
 # stack functions #############
-@inline function pushstack!(vm, x)
+@inline function pushstack(vm, x)
     vm.stackindex += 1
-    if vm.stackindex == STACKSIZE
+    if vm.stackindex > STACKSIZE
         error("VM stack overflow")
     end
     @inbounds vm.stack[vm.stackindex] = x
 end
 
-@inline function popstack!(vm)
+@inline function popstack(vm)
     #println("pop")
     #if vm.stackindex == 0
     #  error("VM stack underflow")
@@ -329,31 +371,59 @@ end
     x
 end
 
-@inline function replacestack!(vm, x)
+@inline function replacestack(vm, x)
     @inbounds vm.stack[vm.stackindex] = x
-    nothing
+end
+
+function print_stack(vm)
+    println("Stack: ")
+    for i = 1 : vm.stackindex
+        printElem(vm, vm.stack[i])
+        println()
+    end
+    println()
 end
 
 # creates new empty environment
 @inline newenv(vm,env) = cons(vm, NIL, env)
 
+
 # ************ bindings ************************************************
 
-function findKey(vm, key, env)
-    bnds = car(vm,vm.env)  #current frame (list of bindings) is on top of env
-    while isCons(bnds) 
+function find_localkey(vm, key, env)
+# search binding with key in current (= top of env) frame 
+    if isNil(key)
+        return NIL
+    end
+    bnds = car(vm,env)  #current frame (list of bindings) is on top of env
+    while isCell(bnds) 
        bnd = car(vm,bnds)
        if car(vm,bnd) == key 
            return bnd
-       else 
-          bnds = cdr(vm,bnds) 
+       end 
+       bnds = cdr(vm,bnds) 
+    end
+    return NIL
+end
+
+function findkey(vm, key)
+# search binding with key in whole environment
+    if isNil(key)
+        return NIL
+    end
+    env = vm.env
+    while isDef(env) 
+       bnd = find_localkey(vm, key, env)
+       if isDef(bnd) 
+          return bnd
        end
+       env = cdr(vm,env)
     end
     return NIL
 end
 
 function boundvalue(vm, key) # lookup symbol.. 
-    bnd = binding(vm, key, vm.env)
+    bnd = findkey(vm, key)
     if bnd == NIL 
         return NIL
     else 
@@ -361,87 +431,36 @@ function boundvalue(vm, key) # lookup symbol..
     end
 end      
 
-function binding(vm, key, env)
-    bnd = findKey(vm, key, env)
-    while isNil(env) 
-       env = cdr(vm,env)
-       if isNil(env) 
-          return NIL
-       end
-       bnd = findKey(vm, key, env)
+function bindkey(vm, key, val) 
+# search for key in top frame, if key found override
+# otherwise make new binding in top frame
+    env = vm.env
+    bnd = find_localkey(vm,key,env)
+    if isNil(bnd)  # key does not yet exist
+       bnd = cons(vm, key, val)  
+       setcar!(vm, env, cons(vm,bnd,car(vm,env)))
+    else           # key exists, just override val
+       setcdr!(vm,bnd,val)
     end
-    return bnd
 end
 
-
-function bindKey(vm, key, val) 
-    f = NIL
-    frame, vm.env = pop(vm, vm.env)   # pop frame from env
-    while isCons(frame) 
-       b,frame = pop(vm, frame)   # search frame for key
-       if car(vm,b) == key 
-          break
-       else 
-          f = cons(vm, b,f)   # store binding in aux frame f
-       end
+function setkey(vm, key, val) 
+# search for key in full environment, if key found override
+# otherwise make new binding in top frame
+    env = vm.env
+    bnd = findkey(vm,key)
+    if isNil(bnd)  # key does not yet exist
+       bnd = cons(vm, key, val)  
+       setcar!(vm, env, cons(vm,bnd,car(vm,env)))
+    else           # key exists, just override val
+       setcdr!(vm,bnd,val)
     end
-    while isCons(f) 
-       b,f = pop(vm, f)    # put other bindings back in place
-       frame = cons(vm,b,frame)
-    end
-    b1 = cons(vm, key, val)  # and add new binding
-    frame = cons(vm, b1, frame)
-    vm.env = cons(vm, frame, vm.env)
 end
 
-function replaceKeyInFrame(vm, key, val, frame)
-    f = NIL
-    while isCons(frame)
-       b,frame = pop(vm, frame)   # search for key
-       if car(vm,b) == key 
-          b1 = cons(vm, key, val)  # new binding
-          frame = cons(vm, b1, frame)
-          break
-       else 
-          f = cons(vm, b,f)
-       end
-    end
-    if frame == NIL   # key not found
-        return NIL
-    end 
-    while isCons(f) 
-       b,f = pop(vm, f)  # put other bindings back in place
-       frame = cons(vm, b,frame)
-    end
-    return frame
-end
-
-function replaceKey(vm, key, val, env)
-    e = NIL  # empty envirohnment
-    envSave = env
-    while isCons(env) 
-       f,env = pop(vm, env)   # search all frames in environment
-       f1 = replaceKeyInFrame(vm, key, val, f)
-       if isDef(f1)  # key found
-          env = cons(vm, f1, env) 
-          printKet(vm, env)
-          break
-       else
-          e = cons(vm,f,e)
-       end
-    end 
-    if isNil(env)  # key not found
-        b = cons(vm,key,val)
-        f,envSave = pop(vm,envSave)
-        f = cons(vm,b,f)
-        return cons(vm,f,env)
-    end
-    while isCons(e)
-      f,e = pop(vm,e)   # put other frames back in place
-      env = cons(vm, f, env)
-    end
-    return env
-end
+#istrue(l) = isDef(l) ?  (unbox(l) != 0) : false
+ 
+@inline istrue(l) = l != NIL && unbox(l) != 0
+@inline isfalse(l) = l == NIL || unbox(l) == 0
 
           
 # ************ io   ****************************************************+
@@ -514,7 +533,8 @@ end
 
 function printInnerList(vm, list, invert)
     isdotted = false
-    if isCons(list)
+    list = strip_closure(vm,list)
+    if isCell(list)
        if invert 
           list, isdotted = reverse_list(vm,list) 
        end
@@ -523,7 +543,7 @@ function printInnerList(vm, list, invert)
        if isdotted   # dotted list that was reversed
           print(" .")
        end
-       while isCons(list)
+       while isCell(list)
           p, list = pop(vm,list) 
           print(" ")
           printElem(vm,p)
@@ -611,7 +631,7 @@ function read_token(io)
        end
        if c == '\n' || isspace(c)
           break
-       elseif !(isdigit(c) || c=='+' || c=='-' || c=='.'
+       elseif !(isdigit(c) || c=='+' || c=='-' || c=='.' || c=='_'
                           || c == '*' || c == '/' || isletter(c))
           #write(io,c)
           skip(io,-1)
@@ -641,7 +661,7 @@ function read_tokens!(vm,io)
         val = cons(vm,newval, val)
       elseif c == '\''   # escape
         val = cons(vm,ESC, val)
-      elseif c == '`'   # Asc (escape value)
+      elseif c == '`'   # Vesc (escape value)
         val = cons(vm, VESC, val)
       elseif c == '\\'   # Backslash = lambda
         val = cons(vm, LAMBDA, val)
@@ -669,19 +689,19 @@ end
 
 # **************************** builtins *********************************
 function f_dup(vm)
-    if isCons(vm.ket)
+    if isCell(vm.ket)
         vm.ket = cons(vm,car(vm,vm.ket), vm.ket)
     end
  end
- 
+
 function f_drop(vm)
-    if isCons(vm.ket)
+    if isCell(vm.ket)
         vm.ket = cdr(vm,vm.ket)
     end
 end
  
 function f_swap(vm)
-    if isCons2(vm,vm.ket)
+    if isCell2(vm,vm.ket)
         a,b,vm.ket  = pop2(vm,vm.ket)
         vm.ket = cons(vm,a,vm.ket)
         vm.ket = cons(vm,b,vm.ket)
@@ -690,22 +710,26 @@ end
  
  
 function f_cons(vm)
-    if isCons2(vm,vm.ket)
+    if isCell2(vm,vm.ket)
        p1, p2, vm.ket = pop2(vm,vm.ket)
+       p2 = strip_closure(vm, p2)  # cons to a closure strips the closure
+                  # instead here we could cons to the quotation of the closure
        vm.ket = cons(vm,cons(vm,p1,p2),vm.ket)
     end
 end
  
 function f_car(vm)
-    if isCons(vm.ket)
+    if isCell(vm.ket)
         p, vm.ket = pop(vm,vm.ket)
-        if isCons(p) # car a list
+        p = strip_closure(vm, p)
+        if isCell(p) # car a list
             head,p = pop(vm,p)
             vm.ket = cons(vm,p,vm.ket)  # leave rest of list on the ket
             vm.ket = cons(vm,head,vm.ket)
         else          # car a symbol
             ####if isNil(p); return; end
             val = boundvalue(vm,p)  # lookup symbol
+            val = strip_closure(vm, val)
             if isCons(val)
               vm.ket = cons(vm,car(vm,val), vm.ket)
             end
@@ -714,17 +738,19 @@ function f_car(vm)
 end
  
 function f_cdr(vm)
-    if isCons(vm.ket)
+    if isCell(vm.ket)
         p, vm.ket = pop(vm,vm.ket)
-        if isCons(p)   # cdr a list
+        p = strip_closure(vm, p)
+        if isCell(p)   # cdr a list
             head, p = pop(vm,p)
             vm.ket = cons(vm,p,vm.ket)
         else
             val = boundvalue(vm,p)  # look up symbole
+            val = strip_closure(vm, val)
             if isCons(val)
                vm.ket = cons(vm,cdr(vm,val), vm.ket)
             else
-               vm.ket = cons(vm,NIL,vm.ket) #at least leave a nill on ket
+               vm.ket = cons(vm,NIL,vm.ket) # at least leave a nill on ket
             end
         end
     end
@@ -738,7 +764,7 @@ gt(x1,x2) = x1 > x2 ? 1 : 0
 my_div(x1,x2) = x2 == 0 ? 0 : div(x1,x2)
 
 function f_math(vm,op)
-    if isCons2(vm,vm.ket)
+    if isCell2(vm,vm.ket)
        n1,n2, vm.ket = pop2(vm,vm.ket)
        if isSymb(n1)
          n1 = boundvalue(vm,n1)
@@ -746,17 +772,23 @@ function f_math(vm,op)
        if isSymb(n2)
          n2 = boundvalue(vm,n2)
        end
+       # Here we should check that n1 and n2 are numbers now !!!!!!
        n3 = boxInt(op(unbox(n1), unbox(n2)))
        vm.ket = cons(vm,n3,vm.ket)
     end
 end
 
 function f_rnd(vm)
-    if isCons(vm.ket)
+    if isCell(vm.ket)
         p, vm.ket = pop(vm,vm.ket)
         if isInt(p)
-            p=boxInt(rand(1:unbox(p)))
-        elseif isCons(p)
+            if p >= 1
+               p=boxInt(rand(1:unbox(p)))
+            else
+               p=boxInt(0)
+            end
+        elseif isCell(p)
+            p = strip_closure(vm,p)
             n=length_list(vm,p)-1
             n1=rand(0:n)
             for i=1:n1
@@ -769,7 +801,7 @@ function f_rnd(vm)
 end
 
 function f_eq(vm)
-    if isCons2(vm,vm.ket)
+    if isCell2(vm,vm.ket)
        p1, p2, vm.ket = pop2(vm,vm.ket)
        b = isEqual(vm,p1,p2)
        # <<4 of Boolean is automatically converted to Int64
@@ -778,24 +810,62 @@ function f_eq(vm)
 end
  
 function f_if(vm)
-    if isCons2(vm,vm.ket)
+    if isCell2(vm,vm.ket)
         e1,e2,vm.ket = pop2(vm,vm.ket)
-        if isCons(vm.ket)
+        if isCell(vm.ket)
             b, vm.ket = pop(vm,vm.ket)
             vm.ket = istrue(b) ? cons(vm,e1,vm.ket) : cons(vm,e2,vm.ket)
         end
     end
 end
 
+function f_dip(vm)
+    if isCell2(vm,vm.ket)
+        q1,q2,vm.ket = pop2(vm,vm.ket)
+        pushstack(vm,q2)
+        do_eval(vm,q1)
+        q2 = popstack(vm)
+        vm.ket = cons(vm,q2,vm.ket)
+    end
+end
+
+function f_cond(vm)
+    if isCell(vm.ket)
+        p, vm.ket = pop(vm,vm.ket)
+        if isAtom(p)
+            p = boundvalue(vm,p)
+        end
+        while isCell(p)
+           p1, p = pop(vm,p)
+           if isCell(p)
+              pushstack(vm,p)
+              do_eval(vm,p1)
+              p = popstack(vm)
+              p2, p = pop(vm,p)  # delay the pop to protect p2 from gc
+              if isCell(vm.ket)
+                 b, vm.ket = pop(vm,vm.ket)
+                 if istrue(b)
+                    do_eval(vm,p2)
+                    return
+                 end
+              end
+            else
+              do_eval(vm,p1)
+              return
+           end
+        end   
+    end
+end
+ 
 function f_esc(vm)
-    if isCons(vm.bra)
+    if isCell(vm.bra)
         val, vm.bra = pop(vm,vm.bra)
         vm.ket = cons(vm,val,vm.ket)
      end
 end
  
 function f_vesc(vm)
-    if isCons(vm.bra)
+    if isCell(vm.bra)
         val, vm.bra = pop(vm,vm.bra)
         vm.ket = cons(vm,val,vm.ket)
         f_val(vm)
@@ -803,26 +873,26 @@ function f_vesc(vm)
 end
  
 function f_val(vm)
-    if isCons(vm.ket)
+    if isCell(vm.ket)
         key, vm.ket = pop(vm,vm.ket)
-        if isCons(key)
+        if isCell(key)
            vm.ket = cons(vm,key,vm.ket)
         else
-           val = boundvalue(vm,key)
-           vm.ket = cons(vm,val,vm.ket)
+           val = boundvalue(vm,key)       # lookup symbol ..
+           vm.ket = cons(vm,val,vm.ket)   # .. and place on ket
         end
      end
 end
 
 function f_trace(vm)
-    if isCons(vm.ket)
+    if isCell(vm.ket)
        p,vm.ket = pop(vm,vm.ket)
        vm.trace = unbox(p)
     end
 end
 
 function f_print(vm)
-    if isCons(vm.ket)
+    if isCell(vm.ket)
         p,vm.ket = pop(vm,vm.ket)
         #print_bra(p,vm)
         #println(" here goes the next")
@@ -833,7 +903,7 @@ end
 
 function f_rec(vm)
     #anonymous recursion: replace bra of this scope by original value
-    if isCons(vm.ket)
+    if isCell(vm.ket)
         b, vm.ket = pop(vm,vm.ket)
         if istrue(b)
             vm.bra = getstack(vm)
@@ -841,33 +911,155 @@ function f_rec(vm)
     end
 end
     
-function f_def(vm)
-    if isCons2(vm,vm.ket)
-        key, value, vm.ket = pop2(vm,vm.ket)
-        if !isCons(key)
-            bindKey(vm,key,value)  #bind key to val in top env-frame
-        else
-        #    x,key = pop(key,vm)
-        #    if isNil(key)
-        #        bind_key(x,value,vm)
-        #    elseif (x == ESC) && isCons(key)  # variable definition
-        #        x,key = pop(key,vm)
-        #        fesc(x,key,value,vm)
-            ##} else if ((x == Hesc) && isCons(key)) { . // set: still to be done
-            ##
-            ##}
-        #    else   # default is handled as let
-        #        f_let(x,key,value,vm)
-        #    end
-        end
+function f_lambda(vm) 
+   if isCell2(vm,vm.ket)
+       keys,q,vm.ket = pop2(vm,vm.ket)
+       if isAtom(q) 
+          q = boundvalue(vm, q)
+       end
+       if isAtom(q) # we need a quotation to do lambda
+           return
+       end 
+       if isDef(keys)           # if arguments are not NIL ..
+           q = cons(vm,DEF, q)  # .. push a definition on q
+           q = cons(vm,keys, q)
+           if isAtom(keys) 
+               q = cons(vm,ESC, q)
+           end
+       end
+       if isCons(q) # make a closure (only of not yet)
+          env = newenv(vm, vm.env)
+          vm.ket = cons(vm, closure(vm,q,env), vm.ket)
+       end
     end
 end
 
+function deepbind(vm, keys, val) 
+# recursively bind all values of list keys to atom val
+# keys must be a list, val an atom
+    while isCell(keys) 
+        key, keys = pop(vm,keys) 
+        if isAtom(key) 
+            bindkey(vm,key,val)
+            if vm.need_gc 
+                pushstack(vm,keys)
+                gc(vm)
+                keys = popstack(vm)
+            end
+        else   # key itself is a list
+            pushstack(vm,keys)
+            deepbind(vm,key, val)
+            keys = popstack(vm)
+        end
+    end
+end 
+
+function match(vm, keys, vals) 
+# bind elements from keys to elements from vals with pattern matching
+# keys must be a list
+    if isAtom(vals)
+        deepbind(vm,keys,vals)
+        return
+    end                                # Q: do we need an else here??
+    while isCell(keys) 
+       key, keys = pop(vm,keys) 
+       if isNil(keys) 
+           bindkey(vm,key,vals)
+       else 
+           val, vals = pop(vm, vals)    # Q: do we need to check for list ??
+           bindkey(vm,key,val)
+       end
+       if isAtom(vals) 
+          deepbind(vm, keys, vals)
+          return
+       end
+    end
+end 
+
+function f_def(vm)
+   if isCell(vm.ket)
+       key, vm.ket = pop(vm,vm.ket)
+       if isAtom(key)
+           if isCell(vm.ket) 
+              val, vm.ket = pop(vm, vm.ket) 
+              bindkey(vm,key,val)  #bind key to val in top env-frame
+           end
+       elseif isDef(key)       # binding a list of keys
+           n = length_nonquoted(vm, key)
+           n1 = 0    # push max n values from ket to stack
+           for i = 1 : n 
+               if isCell(vm.ket)
+                   val, vm.ket = pop(vm,vm.ket)
+                   n1 += 1   
+                   pushstack(vm,val)
+               else
+                  break
+               end
+           end
+           for i = 1 : n1 # make the bindings
+               k, key = pop(vm, key)  # we should have enough elements in key
+               if k == VESC  
+                  k, key = pop(vm,key)   # this is interpreted as set
+                  setkey(vm, k, popstack(vm))
+               elseif isAtom(k) 
+                  bindkey(vm, k, popstack(vm))
+               else 
+                  elem = popstack(vm)
+                  pushstack(vm,key)  # safe key in case of gc
+                  match(vm,k,elem)
+                  key = popstack(vm)
+               end
+           end
+       end
+   end
+end
+
+function f_set(vm) 
+   if isCell2(vm, vm.ket) 
+       key, val, vm.ket = pop2(vm, vm.ket) 
+       if isAtom(key) 
+           setkey(vm,key,val)  # bind key to val in top env-frame
+       end
+    end
+end
+
+function do_eval(vm, op) 
+    if isNil(op) 
+        return
+    elseif isSymb(op) 
+        op = boundvalue(vm,op)
+    end
+    if isNumb(op) || isSymb(op) 
+        vm.ket = cons(vm,op,vm.ket)
+        return
+    end 
+    vm.depth += 1
+    pushstack(vm,vm.env)
+    pushstack(vm,vm.bra)
+    if isCons(op) 
+        vm.bra = op
+        vm.env = newenv(vm,vm.env)
+    elseif isClosure(op) 
+       vm.bra = car(vm,op)
+       vm.env = cdr(vm,op)
+    else 
+       vm.bra = cons(vm,op,NIL)
+       vm.env = newenv(vm,vm.env)
+    end
+    eval_bra(vm)
+    vm.depth -= 1
+    vm.bra = popstack(vm)
+    vm.env = popstack(vm)
+end
+
+
 function f_eval(vm)
-    if isCons(vm.ket)
+    if isCell(vm.ket)
         op,vm.ket = pop(vm,vm.ket)
         if isCons(op)
             eval_cons(vm,op)
+        elseif isClosure(op)
+            eval_closure(vm,op)
         elseif isNil(op)
             return
         elseif isPrim(op)
@@ -881,15 +1073,30 @@ function f_eval(vm)
 end
 
 function eval_cons(vm, op)
-    if isCons(vm.bra)
+    if isCell(vm.bra)
         vm.depth += 1
-        pushstack!(vm,vm.env)
-        pushstack!(vm,vm.bra)
-        pushstack!(vm,op)   # 2nd
-        vm.env = newenv(vm.env,vm)
+        pushstack(vm,vm.env)
+        pushstack(vm,vm.bra)
+        pushstack(vm,op)   # 2nd
+        vm.env = newenv(vm,vm.env)
     else      # tail position
-        replacestack!(vm,op)
+        replacestack(vm,op)
     end
+    vm.bra = op
+end
+
+function eval_closure(vm, clos)
+    op = car(vm,clos)
+    env = newenv(vm, cdr(vm,clos))
+    if isCell(vm.bra)
+        vm.depth += 1
+        pushstack(vm,vm.env)
+        pushstack(vm,vm.bra)
+        pushstack(vm,op)   # 2nd
+    else      # tail position
+        replacestack(vm,op)
+    end
+    vm.env = env
     vm.bra = op
 end
 
@@ -898,43 +1105,14 @@ function eval_numb(vm, n)
 end
 
 function eval_symb(vm,sym)
-    #printElem(sym,0,vm); println()
-    #printElem(vm.ket,false,vm); println()
-    #println()
-    bnd = binding(vm,sym,vm.env)
-    if isNil(bnd)
-        vm.ket = cons(vm,NIL,vm.ket)
+    val = boundvalue(vm,sym)
+    if isCons(val)
+        eval_cons(vm,val)
+    elseif isClosure(val)
+        eval_closure(vm,val)
     else
-        val = cdr(vm,bnd)
-        if isCons(val)
-            eval_cons(vm,val)
-        else
-            vm.ket = cons(vm,val,vm.ket)
-        end
+        vm.ket = cons(vm,val,vm.ket)
     end
-    #=
-    elseif isclosure(bnd,vm)
-        op =cadr(bnd,vm)
-        env = cddr(bnd,vm)
-        if isCons(op)
-            if isCons(vm.bra)  # not tail position
-                vm.depth += 1
-                if vm.depth >  MAX_RECUR_DEPTH
-                    error("Error: too many recursions")
-                end
-                pushstack!(vm,vm.env)
-                pushstack!(vm,vm.bra)
-                pushstack!(vm,op)   ## 2nd
-                vm.env = newenv(env,vm)
-           else   # tail position
-                vm.env = newenv(env,vm)
-            end
-            vm.bra = op
-        end
-    else
-       vm.ket = cons!(cadr(bnd,vm),vm.ket,vm)
-    end
-    =#
 end
 
 
@@ -963,20 +1141,24 @@ end
         f_math(vm,my_div)
     elseif x == LT
         f_math(vm,lt)
-    elseif x ==GT
+    elseif x == GT
         f_math(vm,gt)
-    elseif x ==RND
+    elseif x == RND
         f_rnd(vm)
-    elseif x ==EQ
+    elseif x == EQ
         f_eq(vm)
-    elseif x ==IF
+    elseif x == IF
         f_if(vm)
+    elseif x == COND
+        f_cond(vm)
     #elseif x ==TYP
     #    f_typ(vm)
-    elseif x ==EVAL
+    elseif x == EVAL
         f_eval(vm)
     elseif x == DEF
         f_def(vm)
+    elseif x == LAMBDA
+        f_lambda(vm)
     elseif x == REC
         f_rec(vm)
     elseif x == VAL
@@ -991,8 +1173,8 @@ end
     #    f_tor(vm)
     #elseif x == RIS
     #    f_ris(vm)
-    #elseif x == DIP
-    #    f_dip(vm)
+    elseif x == DIP
+        f_dip(vm)
     elseif x == TRACE
         f_trace(vm)
     elseif x == PRINT
@@ -1023,13 +1205,13 @@ end
 end
 
 
-function eval_bra!(vm)
+function eval_bra(vm)
     #println("eval bra")
     if isAtom(vm.bra) 
         return
     end
     starting_depth = vm.depth
-    pushstack!(vm,vm.bra)
+    pushstack(vm,vm.bra)
     while true
       if vm.trace > 0
          #println("trace ")
@@ -1057,7 +1239,7 @@ function eval_bra!(vm)
       end
  
       if vm.need_gc
-         gc!(vm)
+         gc(vm)
       end
  
       if isAtom(vm.bra)   # exit scope
@@ -1065,10 +1247,10 @@ function eval_bra!(vm)
                break
          end
          vm.depth -= 1
-         popstack!(vm) # 2nd
-         vm.bra = popstack!(vm)
-         vm.env = popstack!(vm)
+         popstack(vm) # 2nd
+         vm.bra = popstack(vm)
+         vm.env = popstack(vm)
       end
     end
-    vm.bra = popstack!(vm)
+    vm.bra = popstack(vm)
  end
