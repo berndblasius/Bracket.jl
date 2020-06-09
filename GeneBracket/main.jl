@@ -1,10 +1,10 @@
 module Bracket
 
-include("bracket.jl")
+include("genebracket.jl")
 
 
 function main(prog)
-    println("Start Bracket")
+    println("Start Gene Bracket")
     vm = Vm()
     #load prelude
     vm.bra = load_file(vm,"prelude.clj")
@@ -44,12 +44,12 @@ function main()
 
      # ***************************
 
-    str = "ack 3 10 def ack' \\[m n]
-     [eval if eq 0 m 
-        [+ n 1] 
-     [eval if eq 0 n 
-         [ack - m 1 1] 
-     [ack - m 1 ack m - n 1] ]] " # "125")
+    #str = "ack 3 10 def ack' \\[m n]
+    # [eval if eq 0 m 
+    #    [+ n 1] 
+    # [eval if eq 0 n 
+    #     [ack - m 1 1] 
+    # [ack - m 1 ack m - n 1] ]] " # "125")
 
      # bench
      # ack 3 4 --> 0.028
@@ -66,7 +66,7 @@ function main()
     #str = "foo def x' 3 def foo' [x` def x'] 4"
     #str = "rnd 3 rnd 3 rnd 3 rnd 3 rnd 3 rnd 3 rnd 3 rnd 3"
     #str = "rnd [1 2 3] rnd [1 2 3] rnd [1 2 3] rnd [1 2 3] rnd [1 2 3] rnd [1 2 3] rnd [1 2 3] "
-    #=str = "ack 3 10 def ack' \\[m n]
+    #= str = "ack 3 10 def ack' \\[m n]
       [cond 
         [ [ack - m 1 ack m - n 1]
           [ack - m 1 1]  [eq 0 n]
@@ -109,7 +109,7 @@ function main()
 end
  
 
-@time main()
+@time main("play.clj")
 
 
 

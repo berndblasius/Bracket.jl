@@ -1,3 +1,10 @@
+# GeneBracket
+# = reduced Bracket for genetic programming
+# no symbols
+# no ESC, VAL, META, PRINT
+# builtin for side_effects
+# no need for GC during single run
+
 # new design of bracket for julia
 # closely follow the go-branch
 
@@ -107,15 +114,13 @@ const VAL  = newprimitive()
 const REC  = newprimitive()
 const DEF  = newprimitive()
 const LAMBDA = newprimitive()
-const ESC   = newprimitive()
-const VESC  = newprimitive()
-const META  = newprimitive()
-const TOR   = newprimitive()
-#const RTO   = newprimitive()
-#const RIS   = newprimitive()
+#const ESC   = newprimitive()
+#const VESC  = newprimitive()
+#const META  = newprimitive()
 const TRACE = newprimitive()
 const TYP   = newprimitive()
-const PRINT = newprimitive()
+const SE    = newprimitive()  # side effects
+#const PRINT = newprimitive()
 # probably not really needed SET, WHL,COND, RTo, RIS
 const UNBOUND = 0
 
@@ -126,12 +131,10 @@ const symboltable = Dict(
    "*"=>MUL, "/"=>DIV, "lt"=>LT, "gt"=>GT, "eq"=>EQ,
    "rnd" =>RND, "if"=>IF, "eval"=>EVAL, "dip"=>DIP, "val"=>VAL,
    "rec"=>REC, "def"=>DEF, "lambda"=>LAMBDA, "\\"=>LAMBDA,
-   "esc"=>ESC, "'"=>ESC, "`"=>VESC, "vesc"=>VESC, 
-   "meta"=>META, "trace"=>TRACE, "typ"=>TYP,
-   "print"=>PRINT)
+   "trace"=>TRACE, "typ"=>TYP, "se"=>SE)
 
-#   "toR"=> TOR, "Rto"=>RTO, "Ris"=>RIS, 
 #   "dip"=>DIP, "cond"=>COND, 
+#   "`"=>VESC, "vesc"=>VESC, 
 
 mutable struct Stats   # some statistics about the running program
     nInst :: Int    # number of Instructions
@@ -147,7 +150,6 @@ mutable struct Vm
     next     :: Int    # index into current cell in arena
     bra      :: Int    # global program stack
     ket      :: Int    # global data stack
-    aux      :: Int    # auxillary global stack
     env      :: Int    # environment
     stack    :: Vector{Int}
     stackindex :: Int
@@ -163,7 +165,7 @@ function Vm()
     next    = 0
     stack   = Vector{Int}(undef,STACKSIZE)
     stats = Stats(0,0,0,0)
-    vm = Vm(arena,brena,next,NIL,NIL,NIL,NIL,stack,0,stats,0,0,false)
+    vm = Vm(arena,brena,next,NIL,NIL,NIL,stack,0,stats,0,0,false)
     vm.env  = cons(vm,NIL,NIL)
     vm
 end
@@ -173,7 +175,6 @@ function reset!(vm)
     vm.stats = Stats(0,0,0,0)
     vm.bra = NIL
     vm.ket = NIL
-    vm.aux = NIL
     vm.env = cons(vm,NIL,NIL)
     vm.stackindex = 0
     vm.depth = 0
@@ -218,7 +219,6 @@ function gc(vm)
     # scan root of every live object
     vm.bra = relocate!(vm, vm.bra)
     vm.ket = relocate!(vm, vm.ket)
-    vm.aux = relocate!(vm, vm.aux)
     vm.env = relocate!(vm, vm.env)
     @inbounds for i = 1 : vm.stackindex
       vm.stack[i] = relocate!(vm,vm.stack[i])
@@ -305,7 +305,8 @@ function length_list(vm,l)
         #      list = cdr(vm,list)
         #   end
         #else
-        if elem != VESC && elem != LAMBDA    #no quoted element
+        #if elem != VESC && elem != LAMBDA    #no quoted element
+        if elem != VAL && elem != LAMBDA    #no quoted element
            n += 1
         end
         list = cdr(vm,list)
@@ -495,6 +496,8 @@ const base64_dec_dict = Dict(
 'o'=>50,'p'=>51,'q'=>52,'r'=>53,'s'=>54,'t'=>55,'u'=>56,'v'=>57,'w'=>58,'x'=>59, 
 'y'=>60,'z'=>61,'-'=>62,'_'=>63 )
     
+
+#=
 function string2symbol(str)
 # encode each character into 6 bits Base64-value
 # only 10*6=60 bits are used, 
@@ -510,7 +513,9 @@ function string2symbol(str)
    end
    boxSymb(x)
 end
+=#
 
+#=
 function symbol2string(symb)
 # decode symbol back to string for output
    x = unbox(symb)  # remove the flag bits 
@@ -527,6 +532,7 @@ function symbol2string(symb)
    end
    return ""
 end
+=#
 
 function printElem(vm, q)
     if isInt(q)
@@ -537,8 +543,8 @@ function printElem(vm, q)
          print("[]")
     elseif isPrim(q)
          print(first(keys(filter(p->p.second == q , symboltable))))
-    elseif isSymb(q)
-         print(symbol2string(q))
+    #elseif isSymb(q)
+    #     print(symbol2string(q))
     else
         printList(vm,q)
     end
@@ -597,7 +603,7 @@ function atom(token)
        sign = -1
      end
  
-     ind = findfirst(x -> x=='.', token)
+     #ind = findfirst(x -> x=='.', token)
      #if ind != nothing && all(isdigit,token[1:ind-1]) && all(isdigit,token[ind+1:end])
      #      f = Float32(sign*Meta.parse(token))
      #      a = box_float(f)
@@ -607,7 +613,8 @@ function atom(token)
      elseif haskey(symboltable,token)
            a = symboltable[token]
      else
-           a = string2symbol(token)
+         error("Symbol in code")
+          # a = string2symbol(token)
      end
      a
 end
@@ -672,10 +679,10 @@ function read_tokens!(vm,io)
       elseif c == '['    # begin of list
         newval = read_tokens!(vm,io)
         val = cons(vm,newval, val)
-      elseif c == '\''   # escape
-        val = cons(vm,ESC, val)
-      elseif c == '`'   # Vesc (escape value)
-        val = cons(vm, VESC, val)
+      #elseif c == '\''   # escape
+      #  val = cons(vm,ESC, val)
+      #elseif c == '`'   # Vesc (escape value)
+      #  val = cons(vm, VESC, val)
       elseif c == '\\'   # Backslash = lambda
         val = cons(vm, LAMBDA, val)
       else               # read new atom
@@ -784,21 +791,6 @@ function f_cdr(vm)
     end
 end
 
-#= 
-function f_toR(vm)
-    if isCell(vm.ket)
-        p, vm.ket = pop(vm,vm.ket)
-        vm.aux = cons(vm,p,vm.aux)
-    end
-end
- 
-function f_Rto(vm)
-    if isCell(vm.aux)
-        p, vm.aux = pop(vm,vm.aux)
-        vm.ket = cons(vm,p,vm.ket)
-    end
-end
-=#
  
 # some math functions (we can easily extend to more..)
 rnd(x) = x < 1 ? 0 : rand(1:x)
@@ -809,12 +801,12 @@ my_div(x1,x2) = x2 == 0 ? 0 : div(x1,x2)
 function f_math1(vm,op)
     if isCell2(vm,vm.ket)
        n1,n2, vm.ket = pop2(vm,vm.ket)
-       if isSymb(n1)
-         n1 = boundvalue(vm,n1)
-       end
-       if isSymb(n2)
-         n2 = boundvalue(vm,n2)
-       end
+       #if isSymb(n1)
+       #  n1 = boundvalue(vm,n1)
+       #end
+       #if isSymb(n2)
+       #  n2 = boundvalue(vm,n2)
+       #end
        # Here we should check that n1 and n2 are numbers now !!!!!!
        n3 = boxInt(op(unbox(n1), unbox(n2)))
        vm.ket = cons(vm,n3,vm.ket)
@@ -824,12 +816,12 @@ end
 function f_math(vm,op)
     if isCell2(vm,vm.ket)
        n1,n2, vm.ket = pop2(vm,vm.ket)
-       if isSymb(n1)
-         n1 = boundvalue(vm,n1)
-       end
-       if isSymb(n2)
-         n2 = boundvalue(vm,n2)
-       end
+       #if isSymb(n1)
+       #  n1 = boundvalue(vm,n1)
+       #end
+       #if isSymb(n2)
+       #  n2 = boundvalue(vm,n2)
+       #end
        if isNumb(n1) && isNumb(n2)
           n3 = boxInt(op(unbox(n1), unbox(n2)))
           vm.ket = cons(vm, n3, vm.ket)
@@ -840,12 +832,12 @@ function f_math(vm,op)
           while isCell(n1) && isCell(n2)
              c1, n1 = pop(vm,n1)
              c2, n2 = pop(vm,n2)
-             if isSymb(c1)
-                 c1 = boundvalue(vm,c1)
-             end
-             if isSymb(c2)
-                 c2 = boundvalue(vm,c2)
-             end
+             #if isSymb(c1)
+             #    c1 = boundvalue(vm,c1)
+             #end
+             #if isSymb(c2)
+             #    c2 = boundvalue(vm,c2)
+             #end
              if isNumb(c1) && isNumb(c2)
                  n3 = boxInt(op(unbox(c1), unbox(c2)))
                  c = cons(vm, n3, c)
@@ -867,9 +859,9 @@ function f_math(vm,op)
           c = NIL
           while isCell(n1) 
              c1, n1 = pop(vm,n1)
-             if isSymb(c1)
-                 c1 = boundvalue(vm,c1)
-             end
+             #if isSymb(c1)
+             #    c1 = boundvalue(vm,c1)
+             #end
              if isNumb(c1) && isNumb(n2)
                  n3 = boxInt(op(unbox(c1), unbox(n2)))
                  c = cons(vm, n3, c)
@@ -889,9 +881,9 @@ function f_math(vm,op)
           c = NIL
           while isCell(n2)
              c2, n2 = pop(vm,n2)
-             if isSymb(c2)
-                 c2 = boundvalue(vm,c2)
-             end
+             #if isSymb(c2)
+             #    c2 = boundvalue(vm,c2)
+             #end
              if isNumb(n1) && isNumb(c2)
                  n3 = boxInt(op(unbox(n1), unbox(c2)))
                  c = cons(vm, n3, c)
@@ -964,67 +956,14 @@ function f_dip(vm)
 end
 
  
-#=
-# old version, we have changed the order of arguments now
-function f_if(vm)
-    if isCell2(vm,vm.ket)
-        e1,e2,vm.ket = pop2(vm,vm.ket)
-        if isCell(vm.ket)
-            b, vm.ket = pop(vm,vm.ket)
-            vm.ket = istrue(b) ? cons(vm,e1,vm.ket) : cons(vm,e2,vm.ket)
-        end
-    end
-end
-=#
-
-#=
-
-function f_dip1(vm)
-    if isCell2(vm,vm.ket)
-        q1,q2,vm.ket = pop2(vm,vm.ket)
-        pushstack(vm,q2)
-        do_eval(vm,q1)
-        q2 = popstack(vm)
-        vm.ket = cons(vm,q2,vm.ket)
-    end
-end
-
-function f_cond(vm)
-    if isCell(vm.ket)
-        p, vm.ket = pop(vm,vm.ket)
-        if isAtom(p)
-            p = boundvalue(vm,p)
-        end
-        while isCell(p)
-           p1, p = pop(vm,p)
-           if isCell(p)
-              pushstack(vm,p)
-              do_eval(vm,p1)
-              p = popstack(vm)
-              p2, p = pop(vm,p)  # delay the pop to protect p2 from gc
-              if isCell(vm.ket)
-                 b, vm.ket = pop(vm,vm.ket)
-                 if istrue(b)
-                    do_eval(vm,p2)
-                    return
-                 end
-              end
-            else
-              do_eval(vm,p1)
-              return
-           end
-        end   
-    end
-end
-=#
-
 function f_esc(vm)
     if isCell(vm.bra)
         val, vm.bra = pop(vm,vm.bra)
         vm.ket = cons(vm,val,vm.ket)
      end
 end
- 
+
+#=
 function f_vesc(vm)
     if isCell(vm.bra)
         val, vm.bra = pop(vm,vm.bra)
@@ -1032,7 +971,8 @@ function f_vesc(vm)
         f_val(vm)
      end
 end
- 
+=#
+
 function f_val(vm)
     if isCell(vm.ket)
         key, vm.ket = pop(vm,vm.ket)
@@ -1052,8 +992,8 @@ function f_typ(vm)
           t = 1
        elseif isPrim(p)
           t = 2
-       elseif isSymb(p)
-          t=3
+       #elseif isSymb(p)
+       #   t=3
        elseif isCons(p)
           t=4
        elseif isClosure(p)
@@ -1104,9 +1044,9 @@ function f_lambda(vm)
        if isDef(keys)           # if arguments are not NIL ..
            q = cons(vm,DEF, q)  # .. push a definition on q
            q = cons(vm,keys, q)
-           if isAtom(keys) 
-               q = cons(vm,ESC, q)
-           end
+           #if isAtom(keys) 
+           #    q = cons(vm,ESC, q)
+           #end
        end
        if isCons(q) # make a closure (only of not yet)
           env = newenv(vm, vm.env)
@@ -1179,7 +1119,8 @@ function f_def(vm)
            end
            for i = 1 : n1 # make the bindings
                k, key = pop(vm, key)  # we should have enough elements in key
-               if k == VESC  
+               #if k == VESC  
+               if k == VAL  
                   k, key = pop(vm,key)   # this is interpreted as set
                   setkey(vm, k, popstack(vm))
                elseif isAtom(k) 
@@ -1207,37 +1148,6 @@ function f_set(vm)
 end
 =#
 
-# with removal of whl, cond, and dip we do not need doEval
-#=
-function do_eval(vm, op) 
-    if isNil(op) 
-        return
-    elseif isSymb(op) 
-        op = boundvalue(vm,op)
-    end
-    if isNumb(op) || isSymb(op) 
-        vm.ket = cons(vm,op,vm.ket)
-        return
-    end 
-    vm.depth += 1
-    pushstack(vm,vm.env)
-    pushstack(vm,vm.bra)
-    if isCons(op) 
-        vm.bra = op
-        vm.env = newenv(vm,vm.env)
-    elseif isClosure(op) 
-       vm.bra = car(vm,op)
-       vm.env = cdr(vm,op)
-    else 
-       vm.bra = cons(vm,op,NIL)
-       vm.env = newenv(vm,vm.env)
-    end
-    eval_bra(vm)
-    vm.depth -= 1
-    vm.bra = popstack(vm)
-    vm.env = popstack(vm)
-end
-=#
 
 function f_eval(vm)
     if isCell(vm.ket)
@@ -1250,8 +1160,8 @@ function f_eval(vm)
             return
         elseif isPrim(op)
               eval_prim(vm,op)
-        elseif isSymb(op)
-              eval_symb(vm,op)
+        #elseif isSymb(op)
+        #      eval_symb(vm,op)
         else    # eval a number
               eval_numb(vm,op)
         end
@@ -1287,9 +1197,18 @@ function eval_closure(vm, clos)
 end
 
 function eval_numb(vm, n)
-    vm.ket = cons(vm,n,vm.ket)
+    val = boundvalue(vm,n)
+    if isCons(val)
+        eval_cons(vm,val)
+    elseif isClosure(val)
+        eval_closure(vm,val)
+    else
+        vm.ket = cons(vm,val,vm.ket)
+    end
+    #vm.ket = cons(vm,n,vm.ket)
 end
 
+#=
 function eval_symb(vm,sym)
     val = boundvalue(vm,sym)
     if isCons(val)
@@ -1300,7 +1219,7 @@ function eval_symb(vm,sym)
         vm.ket = cons(vm,val,vm.ket)
     end
 end
-
+=#
 
 
 @inline function eval_prim(vm,x)
@@ -1351,24 +1270,18 @@ end
         f_rec(vm)
     elseif x == VAL
         f_val(vm)
-    elseif x == ESC
-        f_esc(vm)
-    elseif x == VESC
-        f_vesc(vm)
-    #elseif x == RTO
-    #    f_Rto(vm)
-    #elseif x == TOR
-    #    f_toR(vm)
-    #elseif x == RIS
-    #    f_ris(vm)
+   # elseif x == ESC
+   #     f_esc(vm)
+   # elseif x == VESC
+   #     f_vesc(vm)
     elseif x == DIP
         f_dip(vm)
     elseif x == TRACE
         f_trace(vm)
-    elseif x == PRINT
-        f_print(vm)
-    elseif x == META
-        f_meta(vm)
+    #elseif x == PRINT
+    #    f_print(vm)
+    #elseif x == META
+    #    f_meta(vm)
     end
     nothing
 
@@ -1420,8 +1333,8 @@ function eval_bra(vm)
           vm.ket = cons(vm,e,vm.ket)
       elseif isPrim(e)
           eval_prim(vm,e)
-      elseif isSymb(e)
-           eval_symb(vm,e)
+      #elseif isSymb(e)
+      #     eval_symb(vm,e)
       else
            vm.ket = cons(vm,e,vm.ket)
       end
