@@ -1,5 +1,6 @@
 
-drop drop loop [lt 0 dup - swap 1 keep [*]] 4 1 trace 1
+foo foo def foo' [+ 1] 2
+;drop drop loop [lt 0 dup - swap 1 keep [*]] 4 1 trace 1
 ; drop eval [rec lt 0 dup - swap 1 keep [*]] 4 1 trace 1
 
 ;[rec swap keep [eval]] fac

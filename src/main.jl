@@ -109,7 +109,7 @@ function main()
 end
  
 
-@time main()
+@time main("play.clj")
 
 
 

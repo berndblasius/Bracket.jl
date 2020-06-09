@@ -146,7 +146,7 @@ During the evaluation, the current bra is first stored on the stack and then rep
 old bra is restored from the stack. Note that all evaluations work on the same ket.  
 In other concatenative languages this operator is called `i`. Bracket uses the notation `eval` because `i` is too valuable as a variable name.
   - `<eval [+ 2 3]|` evaluates to `|5>`
-  - `<eval 20 [+ 2 3] 10|` evaluates to `|20 5 10>`
+  - `<20 eval [+ 2 3] 10|` evaluates to `|20 5 10>`
 
 - Conditional evaluation with `eval if`
   - `<eval if 1 [+ 1][- 1] 5|` evaluates to `|6>`
@@ -181,7 +181,7 @@ In other concatenative languages this operator is called `i`. Bracket uses the n
 Bracket supports variable bindings and nested environments.
 An environments is a list of frames, and every frame is a list of bindings. 
 New bindings can be generated with `def`.  
-In contrast to many other concatenative languages, which allow to define new words with the `: ;` notation, Bracket `def` follows the same semantics as any other concatenative operator.
+In contrast to many other concatenative languages, which allow to define new words with the `: ;` notation, Bracket's `def` follows the same semantics as any other concatenative operator.
 
 
 - `def` binds a variable to a value in the current scope
@@ -194,7 +194,7 @@ In contrast to many other concatenative languages, which allow to define new wor
 
 - Evaluation  
 If the top of the bra is a variable, it is evaluated. For this, the current bra is saved and replaced by the binding of the variable. The binding is then evaluated, and finally the old bra is restored.
-  - `<foo foo def foo' [add 1] 2|` evaluates to `|3 3>`
+  - `<foo foo def foo' [add 1] 2|` evaluates to `|4>`
   - `<x|`evaluates to `|[]>` (an unbound variable evaluates to the empty list)
 
 - `val` pushes the bound value of a symbol on ket without evaluation (short form is backtick `)
@@ -210,23 +210,23 @@ Then, the new bra is evaluated in this environment. Finally, the environment is 
 old bra restored from the stack.
 Note that during the evaluation the bra was changed, a new environment was created, but the ket remained.
   - Dynamic scoping   
-   New bindings are possible in inner scopes (these are dynamical scopes as definitions are made during runtime). 
+   New bindings are possible in inner scopes (these are dynamical scopes, as definitions are made during runtime). 
    Old scopes are preserved after leaving the inner scope.  
   `def` first searches for the variable in the current scope. If the variable is found, it is replaced by the new binding. If the variable does not exist in the current scope a new binding is created  
   `<x eval [x def x' 5 x] def x' 3|`  evaluates to `|3 5 3>`   
 
   - Redefining values  
   Values in deeper binding can be overwritten with the backtick operator(which acts similar to `set!` in Scheme)  
-  ``<def [x`] 3|`` In this example, `def` searches in all nested scopes for a binding of `x` if it is found, the binding is redefined. When not no binding to the variable exists in the whole environment, a new binding is generated.
+  ``<def [x`] 3|`` In this example, `def` searches in all nested scopes for a binding of `x`. If it is found, the binding is redefined. When no binding to the variable exists in the whole environment, a new binding is generated.
   
   -  `<x eval [x def x' 2] x def x' 3|` evaluates to  `3 2 3`   
-  (def changes only within scope)  
+  (def changes bindings only within current scope)  
   ``<x eval [x def [x`] 2] x def x' 3|`` evaluates to `2 2 3`   
-  (set changes also outside)
+  (set changes bindings also outside)
 
 
   - Tail recursion  
-  `eval` and `rec` support tail recursion. That is, if the operation during and evaluation is another evaluation, no new environment is created.
+  `eval` and `rec` support tail recursion. That is, if the last operation during an evaluation is another evaluation, no new environment is created.
 
 - `lambda`, closures and lexical scoping
   - `<lambda x' [+ x 1]|`  evaluates to `|[+ x 1 def x']>`  
@@ -266,32 +266,29 @@ Second, at the moment there exists no compiler for Bracket, so there is no speed
 - More types (strings, arrays, hashs, structs)
 
 
-### Combinators
-Bracket includes so-called combinators (similar to higher-order functions in other functional languages). Combinators are functions that act on, and usually unquote, quotations. 
-
 ### Prelude examples
-The file prelude.clj contains a number of predefined functions and combinators.
-Here some useful examples
+The file prelude.clj contains a number of predefined functions and combinators
+and is loaded at the begin of a computation.  
+Here some useful examples:
 
-
-- `def size' [reduce [add 1 drop] 0]`
-- `def sum'  [reduce [add] 0]`
-- `def prod' [reduce [mul] 1]`
-- `def reduce' [each swapd]`
-- `def each' [drop drop eval if rot [rec dup swap dip2 eval' over rot1 splt][drop drop] dup swap]`
-- `def repeat' \[n foo] [eval [rec n def n' sub n 1 foo]]`;
- ; (n foo -- ) ; repeat foo n-times
-- `def curry' [cons esc' cons swap]`  
-- `def bi' [eval dip [keep]]`     ; eval two functions on the same ket argument
-- `def keep' [dip eval' over`]`  ; eval function but retain top argument from ket
-- `def dip3' [dip dip2' swap]`  
-- `def dip2' [dip dip' swap]`  
-- `def splt' [car swap cdr dup]`
+- `def swapd'  [swap rot]`; (abc -- acb) ; deep swap
+- `def rot1' [rot rot]`   ; (abc -- bca)
+- `def over' [swap rot dup swap]` ; (ab -- bab)
 - `def rot4' [swap dip rot']`  ; (abcd -- dabc)
 - `def rot14' [dip rot1' swap]` ; (abcd -- bcda)
-- `def over' [swap rot dup swap]` ; (ab -- bab)
-- `def rot1' [rot rot]`   ; (abc -- bca)
-- `def swapd'  [swap rot]`; (abc -- acb) ; deep swap
+- `def splt' [car swap cdr dup]`
+- `def dip2' [dip dip' swap]`  
+- `def dip3' [dip dip2' swap]`  
+- `def keep' [dip eval' over`]`  ; eval function but retain top argument from ket
+- `def bi' [eval dip [keep]]`     ; eval two functions on the same ket argument
+- `def curry' [cons esc' cons swap]`  
+- `def repeat' \[n foo] [eval [rec n def n' sub n 1 foo]]`;
+ ; (n foo -- ) ; repeat foo n-times
+- `def each' [drop drop eval if rot [rec dup swap dip2 eval' over rot1 splt][drop drop] dup swap]`
+- `def reduce' [each swapd]`
+- `def prod' [reduce [mul] 1]`
+- `def sum'  [reduce [add] 0]`
+- `def size' [reduce [add 1 drop] 0]`
 
 ### Code Examples
 - Factorial
@@ -353,7 +350,9 @@ Here some useful examples
 ## Genetic programming
 Concatenative_programming_languages lend themselves for genetic programming. Some of the reasons are: minimal and exceptional simple syntax, which facilitates manipulation of programs, genetic operations and mutations. Every quotation is a valid program. The terseness of the language, one of the drawbacks of such languages for human programmers, becomes a big plus in a genetic environment.
 
-As a side effect this may make the language a candidate for code golfing
+A simplified version of Bracket, intended for genetic progamming, is in the GeneBracket folder.
+
+As a side effect this may make the Bracket a candidate for code golfing.
 
 ## Implementation
 

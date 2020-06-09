@@ -250,6 +250,7 @@ function tests()
    @test test("- x' y' def [x y] 5 3", "2")
    @test test("- x' y' def [x y] [5 6] 3", "[2 3]")
    @test test("- [5 6] x' def [x] 3", "[2 3]")
+   @test test("foo foo def foo' [+ 1] 2", "4")  # add to a list
 
    @test test("lt 4 10",               "1")
    @test test("lt 10 4",               "0")
