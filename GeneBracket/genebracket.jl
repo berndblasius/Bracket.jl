@@ -4,6 +4,7 @@
 # no ESC, VAL, META, PRINT
 # builtin for side_effects
 # no need for GC during single run
+# numbers as int8
 
 # new design of bracket for julia
 # closely follow the go-branch
@@ -45,13 +46,14 @@ boxClosure(x) = x<<4 | tagClosure   # create a new local closure
 #func boxGlobal(x) = x<<4 | tagGlobal
 boxPrim(x) = x<<4 | tagPrim  # create a local primitive
 boxSymb(x) = x<<4 | tagSymb
-boxInt(x)  = x<<4 | tagInt
+boxInt(x)  = Int64(x)<<4 | tagInt
 
 # floats not yet interpreted
 #func box_float(x Int) Int { Int(reinterpret(Int32,x)) << 32 | tagFloat
 #func unbox_float(x value) float = reinterpret(Float32, Int32(x>>32))
 
 unbox(x) = x>>4   # remove all tags
+unbox8(x) = Int8(x>>4)   # remove all tags
 # in contrast to C, here the pointer is
 # just the heap index, that is, a number
 #func ptr(x value) int    {return int(x)>>4}   
@@ -131,6 +133,13 @@ const symboltable = Dict(
    "*"=>MUL, "/"=>DIV, "lt"=>LT, "gt"=>GT, "eq"=>EQ,
    "rnd" =>RND, "if"=>IF, "eval"=>EVAL, "dip"=>DIP, "val"=>VAL,
    "rec"=>REC, "def"=>DEF, "lambda"=>LAMBDA, "\\"=>LAMBDA,
+   "trace"=>TRACE, "typ"=>TYP, "se"=>SE)
+
+const symboltable1 = Dict(
+   "dup"=>DUP, "drop"=>DROP, "swap"=>SWAP, "rot"=>ROT, "cons"=>CONS, "car"=>CAR, "cdr"=>CDR,
+   "+"=>ADD, "-"=>SUB, "*"=>MUL, "/"=>DIV, "lt"=>LT, "gt"=>GT, "eq"=>EQ,
+   "rnd" =>RND, "?"=>IF, "i"=>EVAL, "dip"=>DIP, "v"=>VAL,
+   "rec"=>REC, "d"=>DEF, "l"=>LAMBDA, "\\"=>LAMBDA,
    "trace"=>TRACE, "typ"=>TYP, "se"=>SE)
 
 #   "dip"=>DIP, "cond"=>COND, 
@@ -323,7 +332,7 @@ function length_list(vm,l)
 # reverse only to first occurence of a closure, because
 #   closures can occur only at end of a list
 #   to avoid infinite loop when printing environments
-function reverse_list(vm,list)
+function reverse_list_long(vm,list)
     l = NIL
     while isCons(list)    # take care not to pop from a closure
       p, list = pop(vm,list)
@@ -337,6 +346,7 @@ function reverse_list(vm,list)
       end
     end
     if isClosure(list)    # take only quotation from closure, not the environment
+         # seems to be wrong, no reversal!
       l = cons(vm,car(vm,list),l)
       return l, true
     elseif isDef(list)    # list contained a dotted pair 
@@ -346,6 +356,26 @@ function reverse_list(vm,list)
       return l, false     # list did not contain a dotted pair
     end
 end
+
+# simple version if list does not contain a dotted pair
+# still might be issues of list is a closure
+function reverse_list(vm,list)
+    l = NIL
+    #list = strip_closure(vm,list)  # no need because list is not a closure
+    while isCons(list)    # take care not to pop from a closure
+      p, list = pop(vm,list)
+      l = cons(vm,p,l)
+      if vm.need_gc
+        pushstack(vm,l)
+        pushstack(vm,list)
+        gc(vm)
+        list = popstack(vm)
+        l = popstack(vm)
+      end
+    end
+    l
+end
+
 
 function isEqual(vm,p1,p2)
     p1 = strip_closure(vm,p1)
@@ -555,7 +585,7 @@ function printInnerList(vm, list, invert)
     list = strip_closure(vm,list)
     if isCell(list)
        if invert 
-          list, isdotted = reverse_list(vm,list) 
+          list, isdotted = reverse_list_long(vm,list) 
        end
        p, list = pop(vm,list) 
        printElem(vm,p)
@@ -808,7 +838,7 @@ function f_math1(vm,op)
        #  n2 = boundvalue(vm,n2)
        #end
        # Here we should check that n1 and n2 are numbers now !!!!!!
-       n3 = boxInt(op(unbox(n1), unbox(n2)))
+       n3 = boxInt(op(unbox8(n1), unbox8(n2)))
        vm.ket = cons(vm,n3,vm.ket)
     end
 end
@@ -823,7 +853,7 @@ function f_math(vm,op)
        #  n2 = boundvalue(vm,n2)
        #end
        if isNumb(n1) && isNumb(n2)
-          n3 = boxInt(op(unbox(n1), unbox(n2)))
+          n3 = boxInt(op(unbox8(n1), unbox8(n2)))
           vm.ket = cons(vm, n3, vm.ket)
        elseif isCell(n1) && isCell(n2)
           n1 = strip_closure(vm,n1)
@@ -839,7 +869,7 @@ function f_math(vm,op)
              #    c2 = boundvalue(vm,c2)
              #end
              if isNumb(c1) && isNumb(c2)
-                 n3 = boxInt(op(unbox(c1), unbox(c2)))
+                 n3 = boxInt(op(unbox8(c1), unbox8(c2)))
                  c = cons(vm, n3, c)
              end
              if vm.need_gc 
@@ -852,7 +882,8 @@ function f_math(vm,op)
                 c  = popstack(vm)
              end
           end
-          c,_ =reverse_list(vm,c)
+          #c,_ =reverse_list(vm,c)
+          c =reverse_list(vm,c)
           vm.ket = cons(vm,c,vm.ket)
        elseif isCell(n1)
           n1 = strip_closure(vm,n1)
@@ -863,7 +894,7 @@ function f_math(vm,op)
              #    c1 = boundvalue(vm,c1)
              #end
              if isNumb(c1) && isNumb(n2)
-                 n3 = boxInt(op(unbox(c1), unbox(n2)))
+                 n3 = boxInt(op(unbox8(c1), unbox8(n2)))
                  c = cons(vm, n3, c)
              end
              if vm.need_gc 
@@ -874,7 +905,8 @@ function f_math(vm,op)
                 c  = popstack(vm)
              end
           end
-          c,_ =reverse_list(vm,c)
+          #c,_ =reverse_list(vm,c)
+          c =reverse_list(vm,c)
           vm.ket = cons(vm,c,vm.ket)
        elseif isCell(n2)
           n2 = strip_closure(vm,n2)
@@ -885,7 +917,7 @@ function f_math(vm,op)
              #    c2 = boundvalue(vm,c2)
              #end
              if isNumb(n1) && isNumb(c2)
-                 n3 = boxInt(op(unbox(n1), unbox(c2)))
+                 n3 = boxInt(op(unbox8(n1), unbox8(c2)))
                  c = cons(vm, n3, c)
              end
              if vm.need_gc 
@@ -896,7 +928,8 @@ function f_math(vm,op)
                 c  = popstack(vm)
              end
           end
-          c,_ =reverse_list(vm,c)
+          #c,_ =reverse_list(vm,c)
+          c =reverse_list(vm,c)
           vm.ket = cons(vm,c,vm.ket)
        end
     end
@@ -907,7 +940,7 @@ function f_rnd(vm)
         p, vm.ket = pop(vm,vm.ket)
         if isInt(p)
             if p >= 1
-               p=boxInt(rand(1:unbox(p)))
+               p=boxInt(rand(1:unbox8(p)))
             else
                p=boxInt(0)
             end

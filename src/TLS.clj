@@ -88,6 +88,20 @@ def isone' \[n] [eq n 1]
 ;         (rempick (sub1 n) 
 ;            (cdr lat)))))))
 
+
+; *************************************************
+; eqan: check if two atoms are the same arguments
+
+;(define eqan? 
+;   (lambda (a1 a2)
+;     (cond
+;       ((and (number? a1 ) (number? a2))
+;          (= a1 a2))
+;       ((or (number? a1 ) (number? a2)) #f)
+;          (else (eq? a1 a2)))))
+
+
+
 ; *************************************************
 ; length
 

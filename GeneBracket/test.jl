@@ -9,14 +9,15 @@ function test(func,result)
     #reset!(vm)
     # load prelude
     #vm.bra = load_file(vm,"../src/prelude.clj")
-    vm.bra = load_file(vm,"prelude.clj")
-    vm.ket = NIL
-    eval_bra(vm)
+    #vm.bra = load_file(vm,"prelude.clj")
+    #vm.ket = NIL
+    #eval_bra(vm)
 
     #vm.depth = 1  # normal programs start in depth 1
     vm.ket = NIL
     vm.bra = make_bra(vm,func)
-    res, b =reverse_list(vm, make_bra(vm,result))
+    #res, b =reverse_list(vm, make_bra(vm,result))
+    res = reverse_list(vm, make_bra(vm,result))
     eval_bra(vm)
     #println("ket is ")
     #printKet(vm,vm.ket)
@@ -484,7 +485,7 @@ function tests()
             [val 100 def [100 val] - val 100] 
             [101 drop] dup]  
         def 102 [val 100 def [100 val] + val 100] 
-        def 100 ]"    , "70 130 101 30 90")
+        def 100 ]"    , "101 -126 101 30 90")
 
     # Factorial
     #simple recursive
@@ -569,6 +570,8 @@ function tests()
 
 
    end # testset
+
+
 
 end
 

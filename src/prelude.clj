@@ -14,10 +14,10 @@ def loop' [rec swap dip eval' over eval']
 
 ;def whl' [eval if swap [] curry [whl] keep eval']
 
-whl f 
-when curry [whl] keep eval' f 
-when curry [whl] f eval f
-when [whl f']
+;whl f 
+;when curry [whl] keep eval' f 
+;when curry [whl] f eval f
+;when [whl f']
 
 ;def whl' [eval if eval rot [whl Rto eval Ris] [drop Rto] toR swap]
 
@@ -146,6 +146,20 @@ def dip2' [dip dip' swap]
 
 ; dip as a macro
 ;def dip' [cons eval' cons rot]
+
+def caar' [car car]
+def cadr' [car cdr]
+def cdar' [cdr car]
+def cddr' [cdr cdr]
+def caaar' [car car car]
+def caadr' [car car cdr]
+def cadar' [car cdr car]
+def caddr' [car cdr cdr]
+def cdaar' [cdr car car]
+def cdadr' [cdr car cdr]
+def cddar' [cdr cdr car]
+def cdddr' [cdr cdr cdr]
+
 
 ; logical operators
 

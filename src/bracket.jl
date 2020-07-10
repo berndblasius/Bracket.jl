@@ -110,13 +110,10 @@ const LAMBDA = newprimitive()
 const ESC   = newprimitive()
 const VESC  = newprimitive()
 const META  = newprimitive()
-const TOR   = newprimitive()
-#const RTO   = newprimitive()
-#const RIS   = newprimitive()
 const TRACE = newprimitive()
 const TYP   = newprimitive()
 const PRINT = newprimitive()
-# probably not really needed SET, WHL,COND, RTo, RIS
+# probably not really needed SET, WHL,COND
 const UNBOUND = 0
 
 
@@ -130,7 +127,6 @@ const symboltable = Dict(
    "meta"=>META, "trace"=>TRACE, "typ"=>TYP,
    "print"=>PRINT)
 
-#   "toR"=> TOR, "Rto"=>RTO, "Ris"=>RIS, 
 #   "dip"=>DIP, "cond"=>COND, 
 
 mutable struct Stats   # some statistics about the running program
@@ -147,7 +143,6 @@ mutable struct Vm
     next     :: Int    # index into current cell in arena
     bra      :: Int    # global program stack
     ket      :: Int    # global data stack
-    aux      :: Int    # auxillary global stack
     env      :: Int    # environment
     stack    :: Vector{Int}
     stackindex :: Int
@@ -163,7 +158,7 @@ function Vm()
     next    = 0
     stack   = Vector{Int}(undef,STACKSIZE)
     stats = Stats(0,0,0,0)
-    vm = Vm(arena,brena,next,NIL,NIL,NIL,NIL,stack,0,stats,0,0,false)
+    vm = Vm(arena,brena,next,NIL,NIL,NIL,stack,0,stats,0,0,false)
     vm.env  = cons(vm,NIL,NIL)
     vm
 end
@@ -173,7 +168,6 @@ function reset!(vm)
     vm.stats = Stats(0,0,0,0)
     vm.bra = NIL
     vm.ket = NIL
-    vm.aux = NIL
     vm.env = cons(vm,NIL,NIL)
     vm.stackindex = 0
     vm.depth = 0
@@ -218,7 +212,6 @@ function gc(vm)
     # scan root of every live object
     vm.bra = relocate!(vm, vm.bra)
     vm.ket = relocate!(vm, vm.ket)
-    vm.aux = relocate!(vm, vm.aux)
     vm.env = relocate!(vm, vm.env)
     @inbounds for i = 1 : vm.stackindex
       vm.stack[i] = relocate!(vm,vm.stack[i])
@@ -784,42 +777,12 @@ function f_cdr(vm)
     end
 end
 
-#= 
-function f_toR(vm)
-    if isCell(vm.ket)
-        p, vm.ket = pop(vm,vm.ket)
-        vm.aux = cons(vm,p,vm.aux)
-    end
-end
- 
-function f_Rto(vm)
-    if isCell(vm.aux)
-        p, vm.aux = pop(vm,vm.aux)
-        vm.ket = cons(vm,p,vm.ket)
-    end
-end
-=#
  
 # some math functions (we can easily extend to more..)
 rnd(x) = x < 1 ? 0 : rand(1:x)
 lt(x1,x2) = x1 < x2 ? 1 : 0
 gt(x1,x2) = x1 > x2 ? 1 : 0
 my_div(x1,x2) = x2 == 0 ? 0 : div(x1,x2)
-
-function f_math1(vm,op)
-    if isCell2(vm,vm.ket)
-       n1,n2, vm.ket = pop2(vm,vm.ket)
-       if isSymb(n1)
-         n1 = boundvalue(vm,n1)
-       end
-       if isSymb(n2)
-         n2 = boundvalue(vm,n2)
-       end
-       # Here we should check that n1 and n2 are numbers now !!!!!!
-       n3 = boxInt(op(unbox(n1), unbox(n2)))
-       vm.ket = cons(vm,n3,vm.ket)
-    end
-end
 
 function f_math(vm,op)
     if isCell2(vm,vm.ket)
@@ -954,16 +917,6 @@ function f_if(vm)
     end
 end
 
-function f_dip(vm)
-    if isCell2(vm,vm.ket)
-        q1,q2,vm.ket = pop2(vm,vm.ket)
-        vm.bra = cons(vm,q2,vm.bra)
-        vm.bra = cons(vm,EVAL,vm.bra)
-        vm.ket = cons(vm,q1,vm.ket)
-    end
-end
-
- 
 #=
 # old version, we have changed the order of arguments now
 function f_if(vm)
@@ -977,46 +930,14 @@ function f_if(vm)
 end
 =#
 
-#=
-
-function f_dip1(vm)
+function f_dip(vm)
     if isCell2(vm,vm.ket)
         q1,q2,vm.ket = pop2(vm,vm.ket)
-        pushstack(vm,q2)
-        do_eval(vm,q1)
-        q2 = popstack(vm)
-        vm.ket = cons(vm,q2,vm.ket)
+        vm.bra = cons(vm,q2,vm.bra)
+        vm.bra = cons(vm,EVAL,vm.bra)
+        vm.ket = cons(vm,q1,vm.ket)
     end
 end
-
-function f_cond(vm)
-    if isCell(vm.ket)
-        p, vm.ket = pop(vm,vm.ket)
-        if isAtom(p)
-            p = boundvalue(vm,p)
-        end
-        while isCell(p)
-           p1, p = pop(vm,p)
-           if isCell(p)
-              pushstack(vm,p)
-              do_eval(vm,p1)
-              p = popstack(vm)
-              p2, p = pop(vm,p)  # delay the pop to protect p2 from gc
-              if isCell(vm.ket)
-                 b, vm.ket = pop(vm,vm.ket)
-                 if istrue(b)
-                    do_eval(vm,p2)
-                    return
-                 end
-              end
-            else
-              do_eval(vm,p1)
-              return
-           end
-        end   
-    end
-end
-=#
 
 function f_esc(vm)
     if isCell(vm.bra)
@@ -1076,7 +997,6 @@ function f_print(vm)
     if isCell(vm.ket)
         p,vm.ket = pop(vm,vm.ket)
         #print_bra(p,vm)
-        #println(" here goes the next")
         printElem(vm,p)
         print(" ")
     end
@@ -1091,8 +1011,35 @@ function f_rec(vm)
         end
     end
 end
-    
+
 function f_lambda(vm) 
+   if isCell2(vm,vm.ket)
+       keys,q,vm.ket = pop2(vm,vm.ket)
+       if isAtom(q) 
+          q = boundvalue(vm, q)
+       end
+       if isCons(q) # make a closure (only of not yet)
+           if isDef(keys)           # if arguments are not NIL ..
+               q = cons(vm,DEF, q)  # .. push a definition on q
+               q = cons(vm,keys, q)
+               if isAtom(keys) 
+                   q = cons(vm,ESC, q)
+               end
+           end
+          env  = newenv(vm, vm.env)
+          clos = closure(vm,q,env)
+        elseif isClosure(q) # new closure with keys as quotation
+          env  = cdr(vm,q)
+          clos = closure(vm,keys,env)
+        else  # isAtom(q) # we need a quotation to do lambda
+           return
+        end
+        vm.ket = cons(vm, clos, vm.ket) # push the new closure on ket
+    end
+end
+
+    
+function f_lambda1(vm) 
    if isCell2(vm,vm.ket)
        keys,q,vm.ket = pop2(vm,vm.ket)
        if isAtom(q) 
@@ -1207,38 +1154,6 @@ function f_set(vm)
 end
 =#
 
-# with removal of whl, cond, and dip we do not need doEval
-#=
-function do_eval(vm, op) 
-    if isNil(op) 
-        return
-    elseif isSymb(op) 
-        op = boundvalue(vm,op)
-    end
-    if isNumb(op) || isSymb(op) 
-        vm.ket = cons(vm,op,vm.ket)
-        return
-    end 
-    vm.depth += 1
-    pushstack(vm,vm.env)
-    pushstack(vm,vm.bra)
-    if isCons(op) 
-        vm.bra = op
-        vm.env = newenv(vm,vm.env)
-    elseif isClosure(op) 
-       vm.bra = car(vm,op)
-       vm.env = cdr(vm,op)
-    else 
-       vm.bra = cons(vm,op,NIL)
-       vm.env = newenv(vm,vm.env)
-    end
-    eval_bra(vm)
-    vm.depth -= 1
-    vm.bra = popstack(vm)
-    vm.env = popstack(vm)
-end
-=#
-
 function f_eval(vm)
     if isCell(vm.ket)
         op,vm.ket = pop(vm,vm.ket)
@@ -1337,8 +1252,6 @@ end
         f_eq(vm)
     elseif x == IF
         f_if(vm)
-    #elseif x == COND
-    #    f_cond(vm)
     elseif x ==TYP
         f_typ(vm)
     elseif x == EVAL
@@ -1355,12 +1268,6 @@ end
         f_esc(vm)
     elseif x == VESC
         f_vesc(vm)
-    #elseif x == RTO
-    #    f_Rto(vm)
-    #elseif x == TOR
-    #    f_toR(vm)
-    #elseif x == RIS
-    #    f_ris(vm)
     elseif x == DIP
         f_dip(vm)
     elseif x == TRACE
@@ -1448,14 +1355,14 @@ function eval_bra(vm)
  # questions
  #
  # def: should this leave the result on the ket?
- #
- # dip instead of toR, Rto?
+ # check all dotted lists
  #
  # car quotion: keep the cdr or not?
  #
- # do we need dip are can we model whl or loop
-
+ # cons a symbol: dotted list or cons onto value of symbol?
+ # val quotation = replace all symbols in quotation with their binding
  # break (leave quotation if false)
  # macros, gensym or named environments?
+ #  ops, like dip could be implemented as macro
  # call-cc, continuations
  # types, multiple dispatch

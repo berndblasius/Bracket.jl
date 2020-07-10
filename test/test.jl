@@ -205,6 +205,8 @@ function tests()
        def make-adder' [addx def x'] 
        def addx' [+ x z def z']" , "6 7 7 8")
    
+   @test test("add1 10 add1 20 def add1' eval \\[x] [\\[][+ x]] 1", "11 21") 
+
    end # testset
 
 
@@ -243,14 +245,13 @@ function tests()
    @test test("- 4 [2 3]", "[2 1]")
    @test test("+ [10 20][1 2]", "[11 22]")
    @test test("+ [10 20][3 1 2]", "[11 22]") # list of different length
-   @test test("lt 5 [4 5 6 7]" , "[0 0 1 1]")
    @test test("+ x' 2 def [x] [5 6]", "[7 8]")
    @test test("+ x' 2 def x' 3", "5")
    @test test("+ 2 x' def x' 3", "5")
    @test test("- x' y' def [x y] 5 3", "2")
    @test test("- x' y' def [x y] [5 6] 3", "[2 3]")
    @test test("- [5 6] x' def [x] 3", "[2 3]")
-   @test test("foo foo def foo' [+ 1] 2", "4")  # add to a list
+   @test test("foo foo def foo' [+ 1] 2", "4")  
 
    @test test("lt 4 10",               "1")
    @test test("lt 10 4",               "0")
@@ -258,6 +259,7 @@ function tests()
    @test test("gt 10 4",               "1")
    @test test("gt 10 10",              "0")
    @test test("gt 4 10",               "0")
+   @test test("lt 5 [4 5 6 7]" , "[0 0 1 1]")
    #@test test("lt 4.0 10",             "1")
    #@test test("lt 4.0 10.0",           "1")
    #@test test("lt 4 10.0",             "1")
@@ -321,9 +323,8 @@ function tests()
    @test test("over 1"  , "")
    @test test("over"    , "")
    @test test("rot1 1 2 3", "2 3 1")
-   @test test("rot 1 2 [+ 4]", "[+ 4] 1 2")
-   @test test("rot 1",         "")
-   @test test("rot1 1 2 3", "2 3 1")
+   @test test("rot1 1 2 [+ 4]", "2 [+ 4] 1")
+   @test test("rot1 1",         "")
    @test test("drop2 10 11 12", "12")
    @test test("drop3 10 11 12", "")
    @test test("dup2 2 3", "2 3 2 3")
@@ -338,9 +339,6 @@ function tests()
    @test test("splt [1 2 3]", "3 [1 2]")
    @test test("cons splt [1 2 3]", "[1 2 3]") # identity
  
-   @test test("dip [+ 1] 5 2", "5 3")
-   @test test("dip [+ 1] [+ 10] 2", "[+ 10] 3")
-   @test test("dip [1 2 3] 4", "4 1 2 3")
    @test test("dip2 [+ 1] 1 2 3", "1 2 4")
    @test test("keep [+] 2 3", "2 5")
    #@test test("keep2 [+] 2 3", "2 3 5")
@@ -369,6 +367,11 @@ function tests()
    @test test("unless 1 [+ 10] 20","20")
    @test test("unless 0 [+ 10] 20","30")
    #@test test("reverse [1 2 3]","[3 2 1]")
+
+   @test test("caar [6 [4 5][1 2 3]", "3")
+   @test test("cadr [6 [4 5][1 2 3]", "[4 5]")
+   @test test("cdar [6 [4 5][1 2 3]", "[1 2]")
+   @test test("cddr [6 [4 5][1 2 3]", "[6]")
    
    @test test("keep [+ 1] 2","2 3")
    @test test("keep2 [+] 2 3","2 3 5")
@@ -409,6 +412,15 @@ function tests()
    @test test("eval [rec gt 0 dup add 1 dup] -5", "0 -1 -2 -3 -4 -5")   #simple loop
    @test test("foo def foo' [rec gt 0 dup add 1 dup] -5", "0 -1 -2 -3 -4 -5")  #simple loop
 
+
+   # simple closure
+
+   @test test("eval f 3 2   
+       a 5 a 6 
+       def a' f 1    
+       def f' \\[x][   
+         \\[y][+ x y]]","5 6 7")
+
    # simple closure for bank account
    @test test("
     acc withdraw' 60 
@@ -427,6 +439,24 @@ function tests()
         def deposit' [balance def [balance`] + balance] 
         def balance' ]"    , "70 130 insuff 30 90")
 
+
+
+   #more fun with closures
+   @test test("
+    show-bal 
+    eval deposit1 acc' 3    
+    def deposit1' \\[ac]   
+      [\\[def [bal`] + bal] ac`] 
+    show-bal deposit 5      
+    def deposit' \\[def [bal`] + bal] acc'   
+    show-bal                      
+    def show-bal' \\[bal] acc'   
+    acc                      
+    def acc' make-acc 10     
+    def make-acc' [          
+       \\[][do-stuff']       
+       def bal'              
+    ]", "18 15 10 do-stuff")    
 
     # Factorial
     #simple recursive
