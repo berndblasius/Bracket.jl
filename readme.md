@@ -252,11 +252,9 @@ Note that during the evaluation the bra was changed, a new environment was creat
  
 - Closure of internal variables  
 If a function returns a closure, also the closure's environment is returned and outlives the evaluation of the function. In this way the closure can store variable bindings  
-   - `def add1 eval [\[][x def [x`] + x 1] def x'] 0'`   
+   - 
+   ``def add1 eval [\[][x def [x`] + x 1] def x'] 0'``   
    creates a closure that internally stores the vlaue of x; evaluating add1 adds 1 to the internal variable
-
-add1 add1 add1 
-def add1' eval [\[][x def [x`] + x 1] def x'] 0
 
 - Lambda acting on an existing closure  
 Usually the second argument of lambda is a quotation. If instead the second argument is already a closure, lambda operates a bit differently. Then, a new closure is generated as a pair, combining the the first argument of lambda and the environment of the closure.
