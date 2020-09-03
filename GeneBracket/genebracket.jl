@@ -48,10 +48,6 @@ boxPrim(x) = x<<4 | tagPrim  # create a local primitive
 boxSymb(x) = x<<4 | tagSymb
 boxInt(x)  = Int64(x)<<4 | tagInt
 
-# floats not yet interpreted
-#func box_float(x Int) Int { Int(reinterpret(Int32,x)) << 32 | tagFloat
-#func unbox_float(x value) float = reinterpret(Float32, Int32(x>>32))
-
 unbox(x) = x>>4   # remove all tags
 unbox8(x) = Int8(x>>4)   # remove all tags
 # in contrast to C, here the pointer is
@@ -136,10 +132,11 @@ const symboltable = Dict(
    "trace"=>TRACE, "typ"=>TYP, "se"=>SE)
 
 const symboltable1 = Dict(
-   "dup"=>DUP, "drop"=>DROP, "swap"=>SWAP, "rot"=>ROT, "cons"=>CONS, "car"=>CAR, "cdr"=>CDR,
+   "u"=>DUP, "o"=>DROP, "s"=>SWAP, "t"=>ROT, 
+   "n"=>CONS, "a"=>CAR, "d"=>CDR,
    "+"=>ADD, "-"=>SUB, "*"=>MUL, "/"=>DIV, "lt"=>LT, "gt"=>GT, "eq"=>EQ,
-   "rnd" =>RND, "?"=>IF, "i"=>EVAL, "dip"=>DIP, "v"=>VAL,
-   "rec"=>REC, "d"=>DEF, "l"=>LAMBDA, "\\"=>LAMBDA,
+   "rnd" =>RND, "?"=>IF, "e"=>EVAL, "i"=>DIP, "v"=>VAL,
+   "r"=>REC, "d"=>DEF, "l"=>LAMBDA, "\\"=>LAMBDA,
    "trace"=>TRACE, "typ"=>TYP, "se"=>SE)
 
 #   "dip"=>DIP, "cond"=>COND, 
@@ -166,15 +163,16 @@ mutable struct Vm
     trace    :: Int   # trace mode e: 0=no trace, 1=trace non-verbose, 3=verbose
     depth    :: Int   # current recursion depth
     need_gc  :: Bool  # flag to indicate that heap space gets rare
+    side_effect
 end
 
-function Vm()
+function Vm(side_eff)
     arena   = Vector{Cell}(undef,CELLS)
     brena   = Vector{Cell}(undef,CELLS)
     next    = 0
     stack   = Vector{Int}(undef,STACKSIZE)
     stats = Stats(0,0,0,0)
-    vm = Vm(arena,brena,next,NIL,NIL,NIL,stack,0,stats,0,0,false)
+    vm = Vm(arena,brena,next,NIL,NIL,NIL,stack,0,stats,0,0,false,side_eff)
     vm.env  = cons(vm,NIL,NIL)
     vm
 end
@@ -338,11 +336,12 @@ function reverse_list_long(vm,list)
       p, list = pop(vm,list)
       l = cons(vm,p,l)
       if vm.need_gc
-        pushstack(vm,l)
-        pushstack(vm,list)
-        gc(vm)
-        list = popstack(vm)
-        l = popstack(vm)
+        #pushstack(vm,l)
+        #pushstack(vm,list)
+        #gc(vm)
+        throw(BracketException("need gc"))
+        #list = popstack(vm)
+        #l = popstack(vm)
       end
     end
     if isClosure(list)    # take only quotation from closure, not the environment
@@ -366,11 +365,12 @@ function reverse_list(vm,list)
       p, list = pop(vm,list)
       l = cons(vm,p,l)
       if vm.need_gc
-        pushstack(vm,l)
-        pushstack(vm,list)
-        gc(vm)
-        list = popstack(vm)
-        l = popstack(vm)
+        #pushstack(vm,l)
+        #pushstack(vm,list)
+        #gc(vm)
+        throw(BracketException("need gc"))
+        #list = popstack(vm)
+        #l = popstack(vm)
       end
     end
     l
@@ -873,13 +873,14 @@ function f_math(vm,op)
                  c = cons(vm, n3, c)
              end
              if vm.need_gc 
-                pushstack(vm,c)
-                pushstack(vm,n1)
-                pushstack(vm,n2)
-                gc(vm)
-                n2 = popstack(vm)
-                n1 = popstack(vm)
-                c  = popstack(vm)
+                #pushstack(vm,c)
+                #pushstack(vm,n1)
+                #pushstack(vm,n2)
+                #gc(vm)
+                throw(BracketException("need gc"))
+                #n2 = popstack(vm)
+                #n1 = popstack(vm)
+                #c  = popstack(vm)
              end
           end
           #c,_ =reverse_list(vm,c)
@@ -898,11 +899,12 @@ function f_math(vm,op)
                  c = cons(vm, n3, c)
              end
              if vm.need_gc 
-                pushstack(vm,c)
-                pushstack(vm,n1)
-                gc(vm)
-                n1 = popstack(vm)
-                c  = popstack(vm)
+                #pushstack(vm,c)
+                #pushstack(vm,n1)
+                #gc(vm)
+                throw(BracketException("need gc"))
+                #n1 = popstack(vm)
+                #c  = popstack(vm)
              end
           end
           #c,_ =reverse_list(vm,c)
@@ -921,11 +923,12 @@ function f_math(vm,op)
                  c = cons(vm, n3, c)
              end
              if vm.need_gc 
-                pushstack(vm,c)
-                pushstack(vm,n2)
-                gc(vm)
-                n2 = popstack(vm)
-                c  = popstack(vm)
+                #pushstack(vm,c)
+                #pushstack(vm,n2)
+                #gc(vm)
+                throw(BracketException("need gc"))
+                #n2 = popstack(vm)
+                #c  = popstack(vm)
              end
           end
           #c,_ =reverse_list(vm,c)
@@ -1071,22 +1074,26 @@ function f_lambda(vm)
        if isAtom(q) 
           q = boundvalue(vm, q)
        end
-       if isAtom(q) # we need a quotation to do lambda
-           return
-       end 
-       if isDef(keys)           # if arguments are not NIL ..
-           q = cons(vm,DEF, q)  # .. push a definition on q
-           q = cons(vm,keys, q)
-           #if isAtom(keys) 
-           #    q = cons(vm,ESC, q)
-           #end
-       end
        if isCons(q) # make a closure (only of not yet)
-          env = newenv(vm, vm.env)
-          vm.ket = cons(vm, closure(vm,q,env), vm.ket)
-       end
+           if isDef(keys)           # if arguments are not NIL ..
+               q = cons(vm,DEF, q)  # .. push a definition on q
+               q = cons(vm,keys, q)
+               #if isAtom(keys) 
+               #    q = cons(vm,ESC, q)
+               #end
+           end
+          env  = newenv(vm, vm.env)
+          clos = closure(vm,q,env)
+        elseif isClosure(q) # new closure with keys as quotation
+          env  = cdr(vm,q)
+          clos = closure(vm,keys,env)
+        else  # isAtom(q) # we need a quotation to do lambda
+           return
+        end
+        vm.ket = cons(vm, clos, vm.ket) # push the new closure on ket
     end
 end
+
 
 function deepbind(vm, keys, val) 
 # recursively bind all values of list keys to atom val
@@ -1096,14 +1103,15 @@ function deepbind(vm, keys, val)
         if isAtom(key) 
             bindkey(vm,key,val)
             if vm.need_gc 
-                pushstack(vm,keys)
-                gc(vm)
-                keys = popstack(vm)
+                #pushstack(vm,keys)
+                #gc(vm)
+                throw(BracketException("need gc"))
+                #keys = popstack(vm)
             end
         else   # key itself is a list
-            pushstack(vm,keys)
+            #pushstack(vm,keys)
             deepbind(vm,key, val)
-            keys = popstack(vm)
+            #keys = popstack(vm)
         end
     end
 end 
@@ -1180,6 +1188,13 @@ function f_set(vm)
     end
 end
 =#
+
+function f_side(vm)
+# perform a side effect
+   e,vm.ket = pop(vm,vm.ket)
+   vm.side_effect(unbox(e))
+   #vm.ket = cons(vm, res, vm.ket)
+end
 
 
 function f_eval(vm)
@@ -1309,6 +1324,8 @@ end
    #     f_vesc(vm)
     elseif x == DIP
         f_dip(vm)
+    elseif x == SE
+        f_side(vm)
     elseif x == TRACE
         f_trace(vm)
     #elseif x == PRINT
@@ -1340,12 +1357,15 @@ end
 
 
 function eval_bra(vm)
+    #try
+
     #println("eval bra")
     if isAtom(vm.bra) 
         return
     end
     starting_depth = vm.depth
     pushstack(vm,vm.bra)
+
     while true
       if vm.trace > 0
          #println("trace ")
@@ -1373,7 +1393,9 @@ function eval_bra(vm)
       end
  
       if vm.need_gc
-         gc(vm)
+         #gc(vm)
+         throw(BracketException("need gc"))
+         
       end
  
       if isAtom(vm.bra)   # exit scope
@@ -1387,6 +1409,10 @@ function eval_bra(vm)
       end
     end
     vm.bra = popstack(vm)
+
+    #catch
+    #  println("error")
+    #end
  end
 
 
@@ -1395,13 +1421,9 @@ function eval_bra(vm)
  #
  # def: should this leave the result on the ket?
  #
- # dip instead of toR, Rto?
- #
  # car quotion: keep the cdr or not?
  #
- # do we need dip are can we model whl or loop
+ # do we need rec?
 
  # break (leave quotation if false)
- # macros, gensym or named environments?
  # call-cc, continuations
- # types, multiple dispatch

@@ -2,13 +2,20 @@ module Bracket
 
 include("genebracket.jl")
 
+function side_effect(n)
+    if n == 1
+        println("Function 1")
+    else
+        println("Other ",n)
+    end
+end
 
 function main(prog)
     println("Start Gene Bracket")
-    vm = Vm()
+    vm = Vm(side_effect)
     #load prelude
-    vm.bra = load_file(vm,"prelude.clj")
-    eval_bra(vm)
+    #vm.bra = load_file(vm,"prelude.clj")
+    #eval_bra(vm)
 
     vm.bra = load_file(vm,prog)
     printBra(vm, vm.bra)
@@ -22,7 +29,7 @@ end
 
 function main()
     println("Start Bracket")
-    vm = Vm()
+    vm = Vm(side_effect)
     #reset!(vm)
     #vm.env = cons(vm,NIL,NIL)
     #load prelude

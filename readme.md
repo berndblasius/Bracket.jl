@@ -107,6 +107,8 @@ the order of elements visually does not change
   - `<cdr [1 2 3]|`   evaluates to `|[1 2]>` ; remainder of a list
   - `<cons 3 [1 2]|`   evaluates to `|[1 2 3]>`
   - `<cons car swap cdr dup [1 2 3]|`   evaluates to `|[1 2 3]>`
+  - `cons 1 2|` evaluates to `|[2 1]>`  
+    consing on an atom creates a list (we avoid dotted pairs)
 
 - Escaping:
   Symbols can be escaped from evaluation by framing into a quotation
@@ -228,15 +230,15 @@ Note that during the evaluation the bra was changed, a new environment was creat
   - Tail recursion  
   `eval` and `rec` support tail recursion. That is, if the last operation during an evaluation is another evaluation, no new environment is created.
 
-- `lambda`, closures and lexical scoping
-  A closure is a pair of any literal (usualy a quotation) and an environment. Closures are created with the lambda operator.
+- `lambda`, closures and lexical scoping  
+  A closure is a pair that combines a quotation and an environment. Closures are created with the lambda operator.
   - `<lambda x' [+ x 1]|`  evaluates to `|[+ x 1 def x']>`  
   Thereby the following has happened:
     - a lexical closure, that contains the quotation and the current enviroment, is created and pushed on the ket. By printing the closure on the ket only the associated quotation is shown, so from inspection of the ket one cannot distinguish a closure from a pure quotation.
     - to handle the argumets of the lambda, the expression `def x'` is pushed on the quotation. Thus, when the closure is evaluated, at first the top value on the ket is bound to the symbol x. In this sense, 
-    formally, we can regard this as a lambda expression, a function that takes the argument x.
-    - the evaluation of a closure takes place in the environment
-    stored in the closure
+    formally, we can regard this as a lambda expression, a function that takes the argument x.  
+  The evaluation of a closure takes place in the environment
+    stored in the closure  
   - `\`, a short notation for lambda   
    `<\x' [+ x 1]|`  evaluates to `|[+ x 1 def x']>`  
   - usually the arguments are passed as a list  
@@ -250,14 +252,20 @@ Note that during the evaluation the bra was changed, a new environment was creat
  
 - Closure of internal variables  
 If a function returns a closure, also the closure's environment is returned and outlives the evaluation of the function. In this way the closure can store variable bindings  
-   - `def add1' eval \[x] [\[][+ x]] 1`   
-   creates a closure that internally stores the vlaue of x; applying add1 to a number adds 1 to it
+   - `def add1 eval [\[][x def [x`] + x 1] def x'] 0'`   
+   creates a closure that internally stores the vlaue of x; evaluating add1 adds 1 to the internal variable
 
-  - Lambda acting on an existing closure  
-  Usually the second argument of lambda is a quotation. If instead the second argument is already a closure, lambda operates a bit differently. Then, a new closure is generated as a pair, combining the the first argument of lambda and the environment of the closure.
-  This allows to pass around the environment of a closure and thus, makes it possible to emulate 'poor man' object orientation and name-spaces.
+add1 add1 add1 
+def add1' eval [\[][x def [x`] + x 1] def x'] 0
 
+- Lambda acting on an existing closure  
+Usually the second argument of lambda is a quotation. If instead the second argument is already a closure, lambda operates a bit differently. Then, a new closure is generated as a pair, combining the the first argument of lambda and the environment of the closure.
+This allows to pass around the environment of a closure and thus, makes it possible to emulate 'poor man' object orientation and name-spaces.
     - `\[+ x] clos` where clos is a closure, generates a new closure in which [+ x] is the quotation and the environment is the environment of `clos.` In this sense, the closure can be regarded as a name-space and any quotation can be evaluated in the environment of the closure.
+    - ``eval \ [x y] clos``   
+    Here, the lambda returns a getter function that shows that bound values of x any in the environment of the closure clos
+    - ``eval \ x' clos``
+    Getter function for the single variable x
     - ``eval \ [def x` 3] clos``   
     Here, the lambda defines a setter function for the local variable `x` in the environment of `clos`. By using `eval` the variable `x` is redefined to 3. In this sense, the closure can be regarded as a class, in which `x` is an object, and in which getter and setter functions can be defined with the lambda. 
 

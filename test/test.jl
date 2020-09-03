@@ -2,7 +2,8 @@ module Test
 
 using Test
 
-include("../src/bracket.jl")
+#include("../src/bracket.jl")
+include("../src/bracket_point.jl")
 
 function test(func,result)
     vm = Vm()
@@ -85,6 +86,10 @@ function tests()
    @test test("cons car x' cdr x' def x' [1 2 3 4]",  "[1 2 3 4]") # identity
    # cons into variable
    #@test test("cons 4 x' def x' [1 2 3]",  "[x . 4]")     # dotted list ..
+
+   # no dotted list
+   @test test("cons 1 2", "[2 1]") # consing two atoms automatically creates a list
+   @test test("cons 1 x' ", "[x 1]") 
    
 
    # def, val
@@ -179,9 +184,8 @@ function tests()
    @test test("eval \\[x y] [- x y] 10 2","8")      
  
    @test test("eval foo` def foo' \\[x] [+ x 1] 10","11")      # backquote or val .. 
-   @test test("eval val foo' def foo' \\[x] [+ x 1] 10","11")  # .. puts closure on ket 
-   @test test("eval val val foo' def foo' \\[x] [+ x 1] 10","11")  # val on closure puts quotation on stack 
-   
+   @test test("eval val foo' def foo' \\[x] [+ x 1] 10","11")  # .. puts quotqtion of closure on ket 
+   #@test test("eval val foo' def foo' \\[x] [+ x 1] 10","11")  # val on closure puts quotation on stack 
    @test test("eval eval [       [x def x' + 1 x`] def x' 10] def x' 1", "2")
    @test test("eval eval [\\ [] [x def x' + 1 x`] def x' 10] def x' 1", "11")
    @test test("eval swap eval dup eval [\\[] [x def [x`] + 1 x`]] def x' 10",         "12 11")
@@ -206,6 +210,10 @@ function tests()
        def addx' [+ x z def z']" , "6 7 7 8")
    
    @test test("add1 10 add1 20 def add1' eval \\[x] [\\[][+ x]] 1", "11 21") 
+
+   @test test("add1 add1 add1 def add1' eval [\\[][x def [x`] + x 1] def x']
+   0", "3 2 1")
+
 
    end # testset
 

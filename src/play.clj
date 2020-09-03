@@ -1,5 +1,34 @@
+;add -1 2
 
-foo foo def foo' [+ 1] 2
+  ;   eval [ rec gt 0 dup add 1 ] -500000000
+;    eval [ rec gt 0 dup add 1 ] -500000000
+
+;"  # 5e8  # 16-17.6 sec Bracket
+;"  # 5e8  # 15-16 sec Bracket_point
+
+
+
+;    ack 3 10 def ack' \\[m n]
+;     [eval if eq 0 m 
+;        [+ n 1] 
+;     [eval if eq 0 n 
+;         [ack - m 1 1] 
+;     [ack - m 1 ack m - n 1] ]] 
+; Bracket_point 7.8-8 sec
+; Bracket       9.8-10 sec    
+
+
+add1 add1 add1 
+def add1' eval [\[][x def [x`] + x 1] def x'] 0
+
+;a 5 a 6 
+;def a' f 1    
+;def f' [ \[y][+ x y] def x']
+
+;","5 6 7")
+
+
+;foo foo def foo' [+ 1] 2
 ;drop drop loop [lt 0 dup - swap 1 keep [*]] 4 1 trace 1
 ; drop eval [rec lt 0 dup - swap 1 keep [*]] 4 1 trace 1
 

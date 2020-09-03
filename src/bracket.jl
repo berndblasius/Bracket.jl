@@ -269,8 +269,25 @@ end
 # --------------------
  
 #unsafe, assumes c is a Cell
-@inbounds car(vm,c) = vm.arena[unbox(c)].car
-@inbounds cdr(vm,c) = vm.arena[unbox(c)].cdr
+
+
+@inline function car(vm,c)
+    if isGlobal(c)
+       @inbounds vm.brena[unbox(c)].car
+    else
+       @inbounds vm.arena[unbox(c)].car
+    end
+end
+@inline function cdr(vm,c)
+    if isGlobal(c)
+       @inbounds vm.brena[unbox(c)].cdr
+    else
+       @inbounds vm.arena[unbox(c)].cdr
+    end
+end
+
+@inline @inbounds car1(vm,c) = vm.arena[unbox(c)].car
+@inline @inbounds cdr1(vm,c) = vm.arena[unbox(c)].cdr
 caar(vm,c) = car(vm,car(vm,c))
 cadr(vm,c) = car(vm,cdr(vm,c))
 cddr(vm,c) = cdr(vm,cdr(vm,c))
@@ -1039,29 +1056,6 @@ function f_lambda(vm)
 end
 
     
-function f_lambda1(vm) 
-   if isCell2(vm,vm.ket)
-       keys,q,vm.ket = pop2(vm,vm.ket)
-       if isAtom(q) 
-          q = boundvalue(vm, q)
-       end
-       if isAtom(q) # we need a quotation to do lambda
-           return
-       end 
-       if isDef(keys)           # if arguments are not NIL ..
-           q = cons(vm,DEF, q)  # .. push a definition on q
-           q = cons(vm,keys, q)
-           if isAtom(keys) 
-               q = cons(vm,ESC, q)
-           end
-       end
-       if isCons(q) # make a closure (only of not yet)
-          env = newenv(vm, vm.env)
-          vm.ket = cons(vm, closure(vm,q,env), vm.ket)
-       end
-    end
-end
-
 function deepbind(vm, keys, val) 
 # recursively bind all values of list keys to atom val
 # keys must be a list, val an atom
@@ -1307,6 +1301,7 @@ function eval_bra(vm)
     end
     starting_depth = vm.depth
     pushstack(vm,vm.bra)
+    #try
     while true
       if vm.trace > 0
          #println("trace ")
@@ -1335,6 +1330,7 @@ function eval_bra(vm)
  
       if vm.need_gc
          gc(vm)
+         #throw(BracketException("need gc"))
       end
  
       if isAtom(vm.bra)   # exit scope
@@ -1347,6 +1343,10 @@ function eval_bra(vm)
          vm.env = popstack(vm)
       end
     end
+
+    #catch
+    #    println("found Bracket error")
+    #end
     vm.bra = popstack(vm)
  end
 

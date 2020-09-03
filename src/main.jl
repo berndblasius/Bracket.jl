@@ -1,16 +1,19 @@
 module Bracket
 
-include("bracket.jl")
+#include("bracket.jl")
+include("bracket_point.jl")
 
 
 function main(prog)
     println("Start Bracket")
     vm = Vm()
+
     #load prelude
-    vm.bra = load_file(vm,"prelude.clj")
-    eval_bra(vm)
+    #vm.bra = load_file(vm,"prelude.clj")
+    #eval_bra(vm)
 
     vm.bra = load_file(vm,prog)
+    println("File loaded")
     printBra(vm, vm.bra)
     vm.ket = NIL
 
@@ -66,7 +69,7 @@ function main()
     #str = "foo def x' 3 def foo' [x` def x'] 4"
     #str = "rnd 3 rnd 3 rnd 3 rnd 3 rnd 3 rnd 3 rnd 3 rnd 3"
     #str = "rnd [1 2 3] rnd [1 2 3] rnd [1 2 3] rnd [1 2 3] rnd [1 2 3] rnd [1 2 3] rnd [1 2 3] "
-    #=str = "ack 3 10 def ack' \\[m n]
+    #= str = "ack 3 10 def ack' \\[m n]
       [cond 
         [ [ack - m 1 ack m - n 1]
           [ack - m 1 1]  [eq 0 n]
@@ -86,7 +89,7 @@ function main()
     =#
 
     #str = "eval [rec gt 0 dup add 1 dup] -5"
-    str  = "typ 20 trace 1"
+    #str  = "typ 20 trace 1"
 
     vm.bra = make_bra(vm, str)
     
@@ -111,6 +114,17 @@ end
 
 @time main("play.clj")
 
+function dummy()
+  println("start dummy")
+  vm = Vm()
+  n = boxInt(5)
+  println(n)
+  q = new_cons(vm,n,NIL)
+  println(car(q))
 
+end
+
+
+#dummy()
 
 end # end module

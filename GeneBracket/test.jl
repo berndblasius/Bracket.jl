@@ -240,6 +240,12 @@ function tests()
    @test test("eval 14 2 eval 14 3 def 14 [eval 13 4] eval 14 2 eval 14 3 def 14 [eval 13 5] 
        def 13 [eval 12 def 11] 
        def 12 [+ val 11 val 10 def 10]" , "6 7 7 8")
+
+
+   #@test test("add1 10 add1 20 def add1' eval \\[x] [\\[][+ x]] 1", "11 21") 
+   @test test("eval 101 10 eval 101 20 def 101 eval \\[100] [\\[][+ val 100]] 1", "11 21") 
+
+
    end # testset
 
 
@@ -450,6 +456,23 @@ function tests()
    @test test("eval [rec gt 0 dup add 1 dup] -5", "0 -1 -2 -3 -4 -5")   #simple loop
    @test test("eval 100 def 100 [rec gt 0 dup add 1 dup] -5", "0 -1 -2 -3 -4 -5")  #simple loop
 
+
+   # simple closure
+
+   #@test test("eval f 3 2   
+   #    a 5 a 6 
+   #    def a' f 1    
+   #    def f' \\[x][   
+   #      \\[y][+ x y]]","5 6 7")
+
+   @test test("eval eval 102 3 2   
+       eval 103 5 eval 103 6 
+       def 103 eval 102 1    
+       def 102 \\[101][   
+         \\[100][+ val 101 val 100]]","5 6 7")
+
+
+
 #=
    # simple closure for bank account
    @test test("
@@ -486,6 +509,42 @@ function tests()
             [101 drop] dup]  
         def 102 [val 100 def [100 val] + val 100] 
         def 100 ]"    , "101 -126 101 30 90")
+
+
+   #more fun with closures
+   #@test test("
+   # show-bal 
+   # eval deposit1 acc' 3    
+   # def deposit1' \\[ac]   
+   #   [\\[def [bal`] + bal] ac`] 
+   # show-bal deposit 5      
+   # def deposit' \\[def [bal`] + bal] acc'   
+   # show-bal                      
+   # def show-bal' \\[bal] acc'   
+   # acc                      
+   # def acc' make-acc 10     
+   # def make-acc' [          
+   #    \\[][do-stuff']       
+   #    def bal'              
+   # ]", "18 15 10 do-stuff")    
+
+
+   @test test("
+    eval 103 
+    eval eval 106 val 102 3    
+    def 106 \\[108]   
+      [\\[def [100 val] + val 100] val 108] 
+    eval 103 eval 105 5      
+    def 105 \\[def [100 val] + val 100] val 102   
+    eval 103                      
+    def 103 \\[val 100] val 102   
+    eval 102                      
+    def 102 eval 101 10     
+    def 101 [          
+       \\[][107]       
+       def 100              
+    ]", "18 15 10 107")    
+
 
     # Factorial
     #simple recursive
