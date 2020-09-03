@@ -251,7 +251,7 @@ Note that during the evaluation the bra was changed, a new environment was creat
 
  
 - Closure of internal variables  
-If a function returns a closure, also the closure's environment is returned and outlives the evaluation of the function. In this way the closure can store variable bindings  
+  If a function returns a closure, also the closure's environment is returned and outlives the evaluation of the function. In this way the closure can store variable bindings  
    - 
    ``def add1 eval [\[][x def [x`] + x 1] def x'] 0'``   
    creates a closure that internally stores the vlaue of x; evaluating add1 adds 1 to the internal variable
